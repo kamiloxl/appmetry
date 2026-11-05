@@ -20,6 +20,7 @@ web/SaaS-only parts, and rename `site` to `app`.
 ## Global Constraints
 
 - License MIT. All UI copy and docs in English. No IP addresses, IDFA/GAID or coordinates are stored anywhere.
+- Deployable unit is the **repo root**: root `wrangler.jsonc`, root `build`/`deploy` scripts, root `.dev.vars.example` with only `ADMIN_PASSWORD` (≥ 12 chars). Migrations run by binding name `DB`. The session key is auto-generated in D1 `meta`. No CLI installer in MVP.
 - Ids from the SDK match `/^[\w-]{8,64}$/`. App keys: `app_` + `randomId(16)`. RevenueCat secrets: `rcw_` + `randomId(24)`, shown once, stored as `sha256Hex`.
 - Batch limits: 1–50 events, body ≤ 64 KB, `props` JSON ≤ 1024 chars, `name` ≤ 255 chars (deep link URL ≤ 500).
 - Event `ts` clamp: drop events outside `[now − 7 days, now + 60 s]`.
@@ -173,7 +174,9 @@ export function mergeAttribution(current: InstallAttribution, candidate: Install
 ### Task 4: Worker skeleton, schema, auth
 
 **Files:**
-- Create: `apps/server/{package.json,tsconfig.json,wrangler.jsonc,vitest.config.ts,.dev.vars.example}`, `apps/server/migrations/0001_init.sql`
+- Create: `wrangler.jsonc` and `.dev.vars.example` **at the repo root** (spec §2 "Deployment": the Deploy to Cloudflare button needs the root to be the deployable unit)
+- Create: `apps/server/{package.json,tsconfig.json,vitest.config.ts}`, `apps/server/migrations/0001_init.sql`
+- Modify: root `package.json` (scripts `dev`, `predev`, `deploy`; `cloudflare.bindings.ADMIN_PASSWORD.description`)
 - Create: `apps/server/src/{index.ts,env.ts,auth.ts}`, `apps/server/src/lib/{crypto.ts,time.ts,ua.ts}`
 - Test: `apps/server/test/setup.ts`, `apps/server/test/auth.test.ts`, `apps/server/test/lib.test.ts`
 
@@ -181,9 +184,11 @@ export function mergeAttribution(current: InstallAttribution, candidate: Install
 - Consumes: nothing from earlier tasks except the workspace.
 - Produces:
 ```ts
-interface Env { DB: D1Database; ASSETS: Fetcher; ADMIN_PASSWORD: string; SESSION_SECRET: string; INGEST_LIMITER?: RateLimit }
+interface Env { DB: D1Database; ASSETS: Fetcher; ADMIN_PASSWORD: string; SESSION_SECRET?: string; INGEST_LIMITER?: RateLimit }
 interface AppRow { id; name; app_key; ios_bundle_id; android_package; app_store_url; play_store_url; web_url; timezone;
-  rc_secret_hash; retention_months: number; show_sandbox: number; created_at: number }
+  rc_secret_hash; retention_months: number; show_sandbox: number; setup_state: string | null; created_at: number }
+export async function sessionKey(env: Env): Promise<string>;  // env.SESSION_SECRET, else meta 'session_key' (created once: 32 random bytes, base64)
+export const MIN_PASSWORD_LENGTH = 12;
 type AppEnv = { Bindings: Env; Variables: { app: AppRow } };
 export function getAppByKey(db, key): Promise<AppRow|null>;  export function getAppById(db, id): Promise<AppRow|null>;
 export function forgetApp(app: AppRow): void;              // 60 s isolate cache as in Datadash env.ts
@@ -201,20 +206,30 @@ export default { fetch: app.fetch, scheduled } satisfies ExportedHandler<Env>;
     - `installs.last_seen` index `(app_id, last_seen)`
     - `payments` index `(app_id, install_id)`
   - Counters `NOT NULL DEFAULT 0`. All times are INTEGER ms UTC.
-- [ ] **Step 2: `wrangler.jsonc`.**
-  - name `appdash`, `main: src/index.ts`, `compatibility_date` = today, observability on.
-  - Assets: `assets.directory: ../dashboard/dist`, `not_found_handling: single-page-application`, `run_worker_first: ["/api/*", "/l/*"]`.
-  - D1 binding `DB` with placeholder id `00000000-…` and `migrations_dir: migrations`.
+- [ ] **Step 2: root `wrangler.jsonc` and scripts.**
+  - name `appdash`, `main: apps/server/src/index.ts`, `compatibility_date` = today, observability on.
+  - Assets: `assets.directory: apps/dashboard/dist`, `not_found_handling: single-page-application`, `run_worker_first: ["/api/*", "/l/*"]`.
+  - D1 binding `DB`, `database_name: appdash`, placeholder id `00000000-0000-0000-0000-000000000000` (the Deploy button replaces it), `migrations_dir: apps/server/migrations`.
   - Cron `0 3 * * *`.
   - Rate limit binding `INGEST_LIMITER`, limit 120 per 60 s. Check the current config key with the `wrangler` skill.
-  - Add a `predev` script that creates `../dashboard/dist/index.html` when it is missing, so `wrangler dev` starts before Task 19 exists.
-- [ ] **Step 3: Failing tests.** Configure `vitest.config.ts` with `@cloudflare/vitest-pool-workers`. `test/setup.ts` applies migrations via `readD1Migrations` + `applyD1Migrations`; follow the current package docs. Bindings: `ADMIN_PASSWORD=test-pass`, `SESSION_SECRET=test-secret`.
+  - `.dev.vars.example` contains only `ADMIN_PASSWORD=change-me-please` (≥ 12 characters).
+  - Root `package.json` → `cloudflare.bindings.ADMIN_PASSWORD.description`: "At least 12 characters. You'll use it to log in to the dashboard."
+  - Root scripts:
+    - `predev`: create `apps/dashboard/dist/index.html` when missing, so `wrangler dev` starts before Task 20 exists
+    - `dev`: `wrangler dev --port 8787`
+    - `deploy`: `wrangler d1 migrations apply DB --remote && wrangler deploy` (binding name, not database name)
+    - `build`: `pnpm --filter @appdash/dashboard build` (a no-op until Task 20)
+- [ ] **Step 3: Failing tests.** Configure `vitest.config.ts` with `@cloudflare/vitest-pool-workers`, `wrangler.configPath: '../../wrangler.jsonc'`. `test/setup.ts` applies migrations via `readD1Migrations` + `applyD1Migrations`; follow the current package docs. Bindings: `ADMIN_PASSWORD=test-password-12`, no `SESSION_SECRET`.
   - `auth.test.ts`:
     - `wrong password returns 401`.
     - `right password sets an HttpOnly cookie and /api/auth/me returns loggedIn true`.
     - `11th failure within 15 min returns 429`.
     - `protected route without cookie returns 401` (use `GET /api/apps`, stubbed to `[]` in this task).
     - `missing ADMIN_PASSWORD returns 500 with setup hint`.
+    - `ADMIN_PASSWORD shorter than 12 refuses login with 500 and the "set a stronger password" hint`.
+    - `sessionKey generates one key in meta and reuses it`: two calls give the same value and `meta` has one row.
+    - `SESSION_SECRET binding takes precedence over meta`.
+    - `cookie signed before a key exists still verifies after`: login, then a second request in a new isolate (cleared cache) is still logged in.
   - `lib.test.ts`:
     - Port the `time` cases from `../datalog/test/core.test.ts`.
     - `platformFromUA`: an iPhone UA gives `ios`, an Android UA gives `android`, curl gives `other`.
@@ -410,7 +425,7 @@ export interface RcHealth { lastEventAt: number|null; events24h: number; withIns
 - [ ] **Step 1: Failing tests.**
   - Auth and dedup:
     - `401 without or with wrong Authorization`. Accept the header equal to the secret or `Bearer <secret>`.
-    - `TEST event returns 200 and stores nothing`.
+    - `TEST event returns 200, is logged in rc_events, stores no payment or event, and is excluded from rcHealth`.
     - `duplicate id returns 200 once stored`.
   - What gets stored:
     - `INITIAL_PURCHASE price 9.99 stores 999 cents payment`.
@@ -545,7 +560,7 @@ export interface RcHealth { lastEventAt: number|null; events24h: number; withIns
 - [ ] **Step 1: Failing tests.**
   - `thrown error returns generic 500 without stack`.
   - `api responses carry X-Content-Type-Options nosniff`.
-  - `missing SESSION_SECRET makes protected routes 500 (fail closed)`.
+  - `missing ADMIN_PASSWORD makes login and protected routes 500 (fail closed), never a default password`.
 - [ ] **Step 2:** Run the tests. Expected: FAIL.
 - [ ] **Step 3: Implement.**
   - `_headers` for `/*` sets:
@@ -558,7 +573,7 @@ export interface RcHealth { lastEventAt: number|null; events24h: number; withIns
     2. Posts a batch with `install`, `session_start`, `screen`, `identify{userId:'u1'}`.
     3. Sets an RC secret and posts an `INITIAL_PURCHASE` with `app_user_id:'u1'`.
     4. Asserts overview revenue 999 and one customer with `matchedBy:'user_id'`.
-- [ ] **Step 4:** Run `pnpm --filter @appdash/server test`. Expected: PASS. Then start `wrangler dev --port 8787` in the background and run `node scripts/smoke.mjs http://localhost:8787`. Expected: `smoke ok`.
+- [ ] **Step 4:** Run `pnpm --filter @appdash/server test`. Expected: PASS. Then start `pnpm run dev` (root) in the background with `.dev.vars` copied from `.dev.vars.example`, and run `ADMIN_PASSWORD=change-me-please node scripts/smoke.mjs http://localhost:8787`. Expected: `smoke ok`.
 - [ ] **Step 5:** Commit: `feat(server): error handling, security headers, smoke test`.
 
 ---
@@ -774,7 +789,7 @@ Dashboard tasks test pure helpers with Vitest. Screens are verified in the brows
   - `api.ts`: `api<T>(path: string, init?: RequestInit): Promise<T>`. Throws `ApiError{status}` and redirects to `/login` on 401.
   - `query.ts`: `toSearch(state: { range: string; from?: number; to?: number; interval?: string; filters: Record<string,string> }): string` and `fromSearch(s: string)`.
   - `format.ts`: `money(cents: number): string` (USD), `duration(ms)`, `pct(change: number|null)`.
-  - Routes: `/login`, `/`, `/apps/:id`, `/apps/:id/customers`, `/apps/:id/links`, `/apps/:id/settings`.
+  - Routes: `/login`, `/`, `/setup`, `/apps/:id`, `/apps/:id/customers`, `/apps/:id/links`, `/apps/:id/settings`, `/apps/:id/setup` (the last three are filled by Tasks 24–25).
 
 - [ ] **Step 1: Failing tests.**
   - `money(999) is "$9.99"`.
@@ -873,27 +888,110 @@ Dashboard tasks test pure helpers with Vitest. Screens are verified in the brows
 - [ ] **Step 4:** Run the tests. Expected: PASS. Then generate a secret in the preview. Expected: shown once; after reload only "Secret set" is visible.
 - [ ] **Step 5:** Commit: `feat(dashboard): settings with install snippet, RevenueCat, privacy controls`.
 
+### Task 25: Setup wizard
+
+**Files:**
+- Create: `apps/server/src/setup.ts`, `apps/dashboard/src/pages/Setup.tsx`, `apps/dashboard/src/lib/setup.ts`
+- Modify: `apps/server/src/index.ts`; `apps/dashboard/src/App.tsx` (redirect after login); `apps/dashboard/src/pages/Settings.tsx` (checklist)
+- Test: `apps/server/test/setup.test.ts`, `apps/dashboard/test/setup.test.ts`
+
+**Interfaces:**
+- Consumes:
+  - `rc_events` and `RcHealth` (Task 9)
+  - links API (Task 8)
+  - `installSnippet`, `aiPrompt` (Task 24)
+  - apps API (Task 5)
+- Produces:
+```ts
+export type SetupStep = 'app'|'firstEvent'|'revenuecatWebhook'|'revenuecatSync'|'attribution'|'privacy';
+export const SETUP_STEPS: SetupStep[];   // in this order
+export interface StepStatus { done: boolean; skipped?: boolean; at?: number; detail?: string }
+export interface SetupStatus { steps: Record<SetupStep, StepStatus>; current: SetupStep | null /* null = complete */ }
+export async function setupStatus(db: D1Database, app: AppRow): Promise<SetupStatus>;  // server/src/setup.ts
+// GET /api/apps/:id/setup → SetupStatus;  PATCH /api/apps/:id/setup {step, state:'done'|'skipped'|'reset'} → SetupStatus
+// dashboard/src/lib/setup.ts:
+export function nextStep(s: SetupStatus): SetupStep | null;
+export function progressLabel(s: SetupStatus): string;   // "Setup 4/6"
+```
+- Detection rules (spec §6a):
+  - `app` is done when the app exists.
+  - `firstEvent`: earliest install. `detail` = `"<device_model>, <platform> <os_version>"`.
+  - `revenuecatWebhook`: earliest `rc_events` row of any type, `TEST` included.
+  - `revenuecatSync`: earliest `rc_events` row with `has_install_attr = 1`.
+  - `attribution` and `privacy` are done only through PATCH.
+  - A skip in `setup_state` beats detection. `reset` clears the stored state.
+
+- [ ] **Step 1: Failing tests.**
+  - `setup.test.ts` (server):
+    - `new app: only app done, current firstEvent`.
+    - `first batch marks firstEvent with device detail`.
+    - `RevenueCat TEST event marks revenuecatWebhook`.
+    - `event with appdash_install_id marks revenuecatSync`.
+    - `skip revenuecat steps then current is attribution`.
+    - `PATCH privacy done completes setup: current null`.
+    - `PATCH unknown step is 400`.
+    - `setup of another app's id is 404`.
+  - `setup.test.ts` (dashboard):
+    - `progressLabel counts done and skipped`.
+    - `nextStep returns the first step neither done nor skipped`.
+- [ ] **Step 2:** Run `pnpm --filter @appdash/server test` and `pnpm --filter @appdash/dashboard test`. Expected: FAIL.
+- [ ] **Step 3: Implement.**
+  - Server: `setup.ts` plus routes. Use 4 cheap `MIN(...)` queries and no new tables.
+  - Wizard UI: one screen per step with Back/Skip/Continue.
+  - Automatic steps poll `GET …/setup` every 3 s while visible, show a spinner with "Waiting for …", and switch to a green ✓ with `detail`.
+  - Step contents, copy from spec §6a:
+    - 2 (`firstEvent`) embeds `installSnippet` and `aiPrompt`.
+    - 3 (`revenuecatWebhook`) has the webhook URL and the "Generate secret" button.
+    - 5 (`attribution`) has an inline "create first link" form.
+    - 6 (`privacy`) has timezone, retention and the `requireConsent` reminder.
+  - Navigation:
+    - After login with zero apps, redirect to `/setup`, starting at step 1.
+    - With an incomplete app, show a banner "Finish setup (4/6)" linking to `/apps/:id/setup`.
+    - Settings shows the checklist with a "Reset" action per step.
+- [ ] **Step 4:** Run the tests. Expected: PASS. Then, in the preview against `pnpm run dev` with an empty local DB:
+  1. Log in. Expected: lands on `/setup` step 1.
+  2. Create an app.
+  3. Run `scripts/smoke.mjs`, which sends a batch and an RC event with the attribute. Expected: steps 2–4 turn ✓ within 3 s each.
+  4. Finish steps 5–6. Expected: the banner disappears.
+  5. Zero console errors.
+- [ ] **Step 5:** Commit: `feat: first-run setup wizard`.
+
 ---
 
 ## Milestone 5: ship
 
-### Task 25: README, deploy flow, release
+### Task 26: README, deploy flow, release
 
 **Files:**
 - Modify: `README.md`, `package.json` (root scripts)
 - Create: `.github/workflows/release-sdk.yml`, `packages/sdk-expo/README.md`
 
 **Interfaces:**
-- Produces root scripts:
-  - `deploy: pnpm --filter @appdash/dashboard build && cd apps/server && wrangler d1 migrations apply appdash --remote && wrangler deploy`
-  - `dev`
-  - `seed`
-  - `smoke`
+- Produces:
+  - Root scripts `seed` (`node apps/server/scripts/seed-demo.mjs` + `wrangler d1 execute DB --local --file …`) and `smoke`.
+  - `build`, `deploy`, `dev` already exist from Task 4.
+  - Always invoke them with `pnpm run …`: `pnpm deploy` is a built-in pnpm command.
+  - A "Deploy to Cloudflare" button at the top of the README: `https://deploy.workers.cloudflare.com/?url=<public repo URL>`.
 
 - [ ] **Step 1: README sections.**
   - "What it tracks".
-  - "Deploy for free (~10 minutes)", mirroring Datadash's steps, with `npx wrangler d1 create appdash --location weur` and a note on `--jurisdiction eu`; check the current flag with the `wrangler` skill.
+  - "Deploy in 5 minutes": the button, then:
+    1. Choose names.
+    2. Enter `ADMIN_PASSWORD`.
+    3. Wait for the build.
+    4. Open the `*.workers.dev` URL.
+    5. Follow the setup wizard.
+    
+    Add a screenshot of each Cloudflare screen.
+  - "Updating": GitHub "Sync fork", which triggers Workers Builds.
+  - "Manual deploy (no GitHub)": Datadash-style steps with `npx wrangler d1 create appdash --location weur`, a note on `--jurisdiction eu`, then `wrangler secret put ADMIN_PASSWORD` and `pnpm run deploy`. Check the flags with the `wrangler` skill.
+  - "Data location". If the Deploy button cannot pin D1 to the EU, say so plainly, and tell EU/UK deployers to use the manual path or to create the D1 in the EU first and paste its id into the fork's `wrangler.jsonc`.
   - "Add the SDK", "Tracked links", "RevenueCat" (webhook setup, `syncRevenueCat` placement, what appears in RevenueCat Charts/Targeting, the lifecycle event list, the health check, and a note to confirm the RevenueCat plan includes webhooks), "Apple Search Ads", "Privacy" (controller role, consent mode, retention, erasure, Cloudflare DPA, sample privacy-policy paragraph), "Free plan limits" (spec §11 table), "Accuracy notes" (iOS link installs, Expo Go, reinstall = new install), "Local development".
 - [ ] **Step 2:** `release-sdk.yml`: on tag `sdk-v*`, run `pnpm --filter @appdash/shared --filter @appdash/expo publish --provenance --access public` with `id-token: write`.
-- [ ] **Step 3:** Run `pnpm typecheck && pnpm test`. Expected: all PASS. Run `pnpm deploy` against a fresh Cloudflare account per the README. Expected: the dashboard loads and smoke passes against the deployed URL (`node scripts/smoke.mjs https://appdash.<you>.workers.dev`).
+- [ ] **Step 3:** Run `pnpm typecheck && pnpm test`. Expected: all PASS. Push the repo to a public GitHub repo and click the Deploy button with a fresh Cloudflare account. Expected:
+  - D1 is created automatically and migrations apply during the build.
+  - Logging in with the entered password lands on the setup wizard.
+  - `ADMIN_PASSWORD=… node scripts/smoke.mjs https://appdash.<you>.workers.dev` passes.
+
+  Then run the manual path once (`pnpm run deploy`) on a second account. Expected: the same result.
 - [ ] **Step 4:** Commit: `docs: README, deploy flow, SDK release workflow`.

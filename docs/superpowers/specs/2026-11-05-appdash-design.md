@@ -12,8 +12,9 @@ money?*
 
 **Success criteria for the MVP**
 
-1. A developer deploys their own instance in ~10 minutes (same flow as Datadash: clone, `wrangler d1 create`, two
-   secrets, `npm run deploy`).
+1. A developer deploys their own instance in ~5 minutes with the **Deploy to Cloudflare** button and one password
+   field. A first-run **setup wizard** in the dashboard then takes them to a verified first event and a verified
+   RevenueCat webhook (§6a). A manual `wrangler` path stays in the README.
 2. Adding `@appdash/expo` plus three lines of code gives sessions, screens, custom events and install context.
 3. Installs are attributed via tracked links + Android Install Referrer (deterministic), Apple Search Ads (AdServices),
    deep links and a self-reported source.
@@ -27,7 +28,7 @@ money?*
 | Product goal | Revenue-first attribution (Datadash for apps) |
 | Revenue source | RevenueCat webhook only |
 | Install attribution | Tracked links + Play Install Referrer + Apple Search Ads AdServices + deep links + self-reported source. **No fingerprinting / probabilistic matching.** |
-| Deployment | Self-host, single admin password (like Datadash). No SaaS mode in MVP. |
+| Deployment | Self-host on the deployer's own Cloudflare account, single admin password (like Datadash). Installed via the Deploy to Cloudflare button, then a setup wizard. No SaaS mode and no CLI installer in MVP. No central appdash server, no telemetry. |
 | Dashboard | Desktop web dashboard in the Datadash style |
 | Codebase | New pnpm monorepo; port proven pieces from `../datalog` (Datadash) |
 | "Mobile first" means | The tracked product is a mobile app; the SDK is the primary integration surface |
@@ -47,6 +48,31 @@ mobile data log/                 (pnpm workspaces, TypeScript everywhere, MIT)
 
 Runtime: one Worker (`apps/server`) with a D1 binding `DB`, static assets from `apps/dashboard/dist`
 (`run_worker_first: ["/api/*", "/l/*"]`), a daily cron, and a Rate Limiting binding for ingestion.
+
+### Deployment (Deploy to Cloudflare button)
+
+Cloudflare's button forks the repo into the user's GitHub/GitLab, provisions the resources declared in the Wrangler
+config (D1 included), builds with Workers Builds and deploys. It does not support a subdirectory that depends on
+siblings, so **the deployable unit is the repository root**:
+- Root `wrangler.jsonc` points at the server and dashboard:
+  - `main: apps/server/src/index.ts`
+  - `assets.directory: apps/dashboard/dist`
+  - `migrations_dir: apps/server/migrations`
+  - default D1 name `appdash`, binding `DB`, placeholder id that Cloudflare replaces
+- Root `package.json` scripts:
+  - `build`: `pnpm --filter @appdash/dashboard build`
+  - `deploy`: `wrangler d1 migrations apply DB --remote && wrangler deploy` (migrations by **binding** name, as Cloudflare recommends)
+- Root `.dev.vars.example` lists one secret, `ADMIN_PASSWORD`. Its description in `package.json` →
+  `cloudflare.bindings` says "At least 12 characters. You'll use it to log in to the dashboard."
+- **No `SESSION_SECRET` to set.** On first use the Worker generates a 32-byte random key and stores it in D1 table
+  `meta(key PK, value)`. If `SESSION_SECRET` is set as a secret, it takes precedence.
+- After deploy, the user opens `https://appdash.<subdomain>.workers.dev`, logs in, and lands in the setup wizard.
+- Updates: the forked repo builds on push. The README explains pulling upstream changes, via GitHub "Sync fork" or `git pull upstream`.
+- Data location: whether auto-provisioned D1 can be pinned to the EU is checked during implementation. If it can't,
+  the README documents creating the D1 in the EU first and pasting its id.
+
+What leaves the deployer's account: Apple receives only the AdServices token; RevenueCat sends webhooks in; GitHub
+holds the fork; npm serves the SDK at app build time. Nothing is sent to the appdash project.
 
 **Ported from Datadash** (copied, then adapted — no shared package between the repos):
 `lib/crypto.ts` (HMAC sessions, constant-time compare, random ids), `lib/time.ts` (timezone bucketing),
@@ -149,6 +175,8 @@ RevenueCat method names are verified against the current `react-native-purchases
 | `POST /api/webhooks/revenuecat/:appId` | `Authorization` header == app's RC secret | Payment events |
 | `POST /api/auth/login`, `/logout`, `GET /me` | password → HMAC session cookie | Dashboard login (ported) |
 | `GET/POST /api/apps…`, `/api/links…`, `/api/stats/…`, `DELETE /api/apps/:id/users` | session | Dashboard API |
+| `GET /api/apps/:id/setup` | session | Setup wizard status: `{ steps: { app, firstEvent, revenuecatWebhook, revenuecatSync, attribution, privacy }: { done: boolean, at?: number, detail?: string }, current }` |
+| `PATCH /api/apps/:id/setup` | session | Mark a manual step done or skipped: `{ step, state: 'done' \| 'skipped' }` |
 
 ### Ingestion (`/api/v1/batch`)
 
@@ -181,7 +209,10 @@ Insert `link_clicks` row with a new `click_id`, platform (from UA), country. Red
 
 ```sql
 apps(id PK, name, app_key UNIQUE, ios_bundle_id, android_package, app_store_url, play_store_url, web_url,
-     timezone DEFAULT 'UTC', rc_secret_hash, retention_months DEFAULT 25, created_at)
+     timezone DEFAULT 'UTC', rc_secret_hash, retention_months DEFAULT 25, show_sandbox DEFAULT 0,
+     setup_state TEXT /* JSON, §6a */, created_at)
+
+meta(key PK, value)   -- instance-level values, e.g. the generated session key
 
 installs(app_id, id, PK(app_id,id), platform, first_seen, last_seen, app_version, os_version, device_model,
          locale, country, region, city,
@@ -269,7 +300,8 @@ timeline, filterable by source and campaign.
 | `EXPIRATION` | `rc_subscription_expired` |
 | `PRODUCT_CHANGE` | `rc_product_changed` |
 
-Other types are logged in `rc_events` and otherwise ignored. Revenue rules (above) are unchanged.
+Other types are logged in `rc_events` and otherwise ignored. Revenue rules (above) are unchanged. `TEST` events
+(RevenueCat's "Send test event" button) are logged so the setup wizard can detect them, and are excluded from health.
 
 ### Integration health
 
@@ -299,7 +331,24 @@ Desktop layout ported from Datadash.
   delete user data (by `user_id` or install id), RevenueCat integration health (§5) with a warning below 50%.
 
 Out of MVP: retention cohorts, funnels, live globe, CSV/Power BI exports, Search Ads campaign names,
-multi-user / SaaS mode, other SDKs (bare RN, Swift, Kotlin, Flutter).
+multi-user / SaaS mode, other SDKs (bare RN, Swift, Kotlin, Flutter), CLI installer (`npx create-appdash`).
+
+## 6a. Setup wizard
+
+Shown after login whenever an instance has no apps, and per app until every step is `done` or `skipped`. Afterwards
+it lives in Settings as a "Setup 4/6" checklist. Steps that can verify themselves do it by polling
+`GET /api/apps/:id/setup` every 3 s while the step is open. State is stored in `apps.setup_state` (JSON).
+
+| # | Step | User does | Done when (automatic unless marked manual) |
+| --- | --- | --- | --- |
+| 1 | App | Name, iOS bundle id, Android package, store URLs (optional) | App created |
+| 2 | Install SDK | Copies snippet or "Copy AI prompt"; builds the app | First batch received → shows "✓ First install: <device>, <OS>" |
+| 3 | RevenueCat webhook | Pastes URL + generated secret in RevenueCat, clicks "Send test event" | `TEST` (or any) event in `rc_events` → "✓ Webhook works" |
+| 4 | RevenueCat sync | Adds `Appdash.syncRevenueCat(Purchases)` | First RC event with `appdash_install_id` → "✓ Install id reaches RevenueCat". Skippable: shows "waiting for first purchase". |
+| 5 | Attribution | Optional first tracked link. Reads notes: Search Ads needs no setup; Install Referrer needs a dev build; deep link scheme | Manual "Continue" |
+| 6 | Privacy | Timezone, retention months, reminder about `requireConsent` and the privacy-policy paragraph | Manual "Finish" |
+
+Steps 3–4 can be skipped for apps without RevenueCat. Skipping is reversible from the checklist.
 
 ## 7. Privacy (UK GDPR, PECR)
 
@@ -326,10 +375,10 @@ The person deploying an instance is the controller for their app's users; appdas
 | A03 Software supply chain | Lockfile, minimal deps, SDK published with `npm publish --provenance` from CI |
 | A04 Cryptographic failures | HMAC-signed session cookie (`HttpOnly`, `Secure`, `SameSite=Lax`); RC secret stored as SHA-256 hash, constant-time compare |
 | A05 Injection | Prepared statements only; shared schema validation; React escaping in dashboard |
-| A07 Authentication failures | Password login with per-IP lockout (10 failures / 15 min), ported from Datadash |
+| A07 Authentication failures | Password login with per-IP lockout (10 failures / 15 min), ported from Datadash. `ADMIN_PASSWORD` shorter than 12 characters → login refused with a "set a stronger password in Cloudflare → Settings → Variables" message |
 | A08 Integrity failures | Webhook authenticated; event ids dedup replays |
 | A09 Logging & alerting | Workers observability on; no PII in logs |
-| A10 Mishandling exceptional conditions | Fail closed on missing secrets/bindings; ingestion errors return generic codes |
+| A10 Mishandling exceptional conditions | Fail closed on missing `ADMIN_PASSWORD`/bindings; session key auto-generated in D1 (never a hard-coded fallback); ingestion errors return generic codes |
 
 Known limitation: the public app key lets anyone send fake events (true of all client-side analytics). Mitigated by
 rate limiting, size limits and the bundle-id check.
