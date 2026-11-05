@@ -159,8 +159,10 @@ CREATE TABLE rc_events (
 );
 CREATE INDEX rc_events_ts ON rc_events (app_id, ts);
 
+-- Wrong-password attempts for the per-IP lockout. No IP is stored: ip_hash is HMAC-SHA256(session key, IP), hex.
+-- Rows older than 15 minutes are purged on the next failure and by the daily cron.
 CREATE TABLE login_failures (
-  ip TEXT NOT NULL,
+  ip_hash TEXT NOT NULL,
   ts INTEGER NOT NULL
 );
-CREATE INDEX login_failures_ip_ts ON login_failures (ip, ts);
+CREATE INDEX login_failures_ip_hash_ts ON login_failures (ip_hash, ts);

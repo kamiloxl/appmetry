@@ -1,11 +1,13 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { AppEnv, Env } from './env';
-import { signToken, verifyToken } from './lib/crypto';
+import { hmacHex, signToken, verifyToken } from './lib/crypto';
 
 /** Self-hosted, single owner: one password (ADMIN_PASSWORD) opens the dashboard. */
 
 export const MIN_PASSWORD_LENGTH = 12;
+export const MAX_LOGIN_FAILURES = 10;
+export const LOCKOUT_MS = 15 * 60_000;
 export const AUTH_COOKIE = 'ad_auth';
 const AUTH_DAYS = 30;
 const SUBJECT = 'admin';
@@ -81,3 +83,35 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!(await isLoggedIn(c))) return c.json({ error: 'unauthorized' }, 401);
   await next();
 };
+
+// ---------- default-deny for /api/*
+
+/**
+ * The only /api routes reachable without a session. Everything else under /api/ requires login.
+ * Later tasks add public routes here, never by skipping the guard.
+ */
+export const PUBLIC_API_ROUTES: readonly string[] = ['POST /api/auth/login', 'POST /api/auth/logout', 'GET /api/auth/me'];
+/** Path prefixes that are public for every method (incl. CORS preflight): SDK ingest/attribution and webhooks. */
+export const PUBLIC_API_PREFIXES: readonly string[] = ['/api/v1/', '/api/webhooks/'];
+
+export function isPublicApi(method: string, path: string): boolean {
+  return PUBLIC_API_ROUTES.includes(`${method.toUpperCase()} ${path}`) || PUBLIC_API_PREFIXES.some((p) => path.startsWith(p));
+}
+
+/** Mounted on /api/*: requires a session unless the route is on the public allowlist. */
+export const apiGuard: MiddlewareHandler<AppEnv> = async (c, next) => {
+  if (isPublicApi(c.req.method, c.req.path)) return next();
+  return requireAuth(c, next);
+};
+
+// ---------- login failures (per-IP lockout without storing IPs)
+
+/** Keyed hash of the client IP, so the lockout works without storing the address (spec §7). */
+export async function ipHash(env: Env, ip: string): Promise<string> {
+  return hmacHex(await sessionKey(env), ip);
+}
+
+/** Delete failures that no longer count towards a lockout. Called on each failure and by the daily cron. */
+export async function purgeLoginFailures(db: D1Database, now = Date.now()): Promise<void> {
+  await db.prepare('DELETE FROM login_failures WHERE ts < ?').bind(now - LOCKOUT_MS).run();
+}

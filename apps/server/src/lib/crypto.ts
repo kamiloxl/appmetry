@@ -16,6 +16,11 @@ async function hmac(key: Uint8Array, data: string): Promise<ArrayBuffer> {
   return crypto.subtle.sign('HMAC', k, enc.encode(data));
 }
 
+/** HMAC-SHA256 of `data` keyed with `secret`, as lowercase hex. */
+export async function hmacHex(secret: string, data: string): Promise<string> {
+  return Array.from(new Uint8Array(await hmac(enc.encode(secret), data)), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /** Constant-time string compare (the length is not secret). */
 export function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;

@@ -1,8 +1,8 @@
-import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
+import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import worker from '../src/index';
-import { forgetSessionKey, sessionKey } from '../src/auth';
+import { forgetSessionKey, purgeLoginFailures, sessionKey } from '../src/auth';
 import type { Env } from '../src/env';
 
 const BASE = 'https://appdash.example.workers.dev';
@@ -78,6 +78,19 @@ describe('password login', () => {
     expect((await login('test-password-12', freshIp())).status).toBe(200);
   });
 
+  it('stores a keyed hash of the IP, never the raw IP', async () => {
+    const ip = '192.0.2.77';
+    expect((await login('not-the-password', ip)).status).toBe(401);
+    const rows = await env.DB.prepare('SELECT * FROM login_failures').all<Record<string, unknown>>();
+    expect(rows.results).toHaveLength(1);
+    expect(Object.keys(rows.results[0]).sort()).toEqual(['ip_hash', 'ts']);
+    expect(rows.results[0].ip_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(rows.results)).not.toContain(ip);
+    // A successful login from the same IP clears its failures.
+    expect((await login('test-password-12', ip)).status).toBe(200);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM login_failures').first('n')).toBe(0);
+  });
+
   it('protected route without cookie returns 401', async () => {
     const res = await call('/api/apps');
     expect(res.status).toBe(401);
@@ -87,6 +100,33 @@ describe('password login', () => {
     const authed = await call('/api/apps', { cookie: cookieFrom(ok) });
     expect(authed.status).toBe(200);
     expect(await authed.json()).toEqual([]);
+  });
+
+  it('every /api route needs a session unless it is on the public allowlist', async () => {
+    for (const [method, path] of [
+      ['GET', '/api/anything'],
+      ['POST', '/api/apps/abc/links'],
+      ['GET', '/api/stats/overview'],
+      ['GET', '/api/auth/login'],
+      ['DELETE', '/api/auth/me'],
+      ['GET', '/api/v1'],
+    ]) {
+      const res = await call(path, { method });
+      expect(res.status, `${method} ${path}`).toBe(401);
+    }
+  });
+
+  it('SDK and webhook routes are not blocked by auth', async () => {
+    for (const [method, path] of [
+      ['POST', '/api/v1/batch'],
+      ['GET', '/api/v1/attribution'],
+      ['OPTIONS', '/api/v1/batch'],
+      ['POST', '/api/webhooks/revenuecat/app1'],
+    ]) {
+      const res = await call(path, { method });
+      expect(res.status, `${method} ${path}`).not.toBe(401);
+      expect([404, 405], `${method} ${path}`).toContain(res.status);
+    }
   });
 
   it('rejects a tampered cookie', async () => {
@@ -152,5 +192,34 @@ describe('session key', () => {
     forgetSessionKey();
     const me = await call('/api/auth/me', { cookie: cookieFrom(ok) });
     expect(await me.json()).toEqual({ loggedIn: true });
+  });
+});
+
+describe('login failure retention', () => {
+  const LOCKOUT_MS = 15 * 60_000;
+
+  async function seed(now: number) {
+    await env.DB.batch(
+      [now - LOCKOUT_MS - 1, now - 2 * 86_400_000, now - LOCKOUT_MS + 1, now - 1000].map((ts) =>
+        env.DB.prepare('INSERT INTO login_failures (ip_hash, ts) VALUES (?, ?)').bind('ab'.repeat(32), ts),
+      ),
+    );
+  }
+
+  it('purgeLoginFailures removes rows older than 15 minutes', async () => {
+    const now = Date.now();
+    await seed(now);
+    await purgeLoginFailures(env.DB, now);
+    const rows = await env.DB.prepare('SELECT ts FROM login_failures ORDER BY ts').all<{ ts: number }>();
+    expect(rows.results.map((r) => r.ts)).toEqual([now - LOCKOUT_MS + 1, now - 1000]);
+  });
+
+  it('the daily cron purges stale login failures', async () => {
+    const now = Date.now();
+    await seed(now);
+    const ctx = createExecutionContext();
+    await worker.scheduled(createScheduledController({ scheduledTime: now, cron: '0 3 * * *' }), env, ctx);
+    await waitOnExecutionContext(ctx);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM login_failures').first('n')).toBe(2);
   });
 });
