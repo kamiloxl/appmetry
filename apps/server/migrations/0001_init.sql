@@ -100,7 +100,7 @@ CREATE TABLE events (
   PRIMARY KEY (app_id, id)
 );
 CREATE INDEX events_ts ON events (app_id, ts);
-CREATE INDEX events_session_id ON events (app_id, session_id);
+CREATE INDEX events_install_ts ON events (app_id, install_id, ts);
 -- Session aggregates and entry/exit screen lookups during ingestion (src/ingest.ts).
 CREATE INDEX events_session_type_ts ON events (app_id, session_id, type, ts);
 

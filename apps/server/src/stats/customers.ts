@@ -21,13 +21,15 @@ const LIMIT = 200;
 /** Installs with at least one payment in range, biggest spenders first. One query. */
 export async function customers(ctx: StatsCtx): Promise<Customer[]> {
   const { db, app, range, filter } = ctx;
+  const sb2 = ctx.sandbox.replaceAll('p.', 'p2.');
+  const sb3 = ctx.sandbox.replaceAll('p.', 'p3.');
   const res = await db
     .prepare(
       `SELECT i.id AS installId, i.email AS email, i.source AS source, i.channel AS channel, i.first_seen AS firstSeen,
               SUM(p.amount) AS total,
               SUM(CASE WHEN p.kind = 'payment' THEN 1 ELSE 0 END) AS payments,
-              (SELECT MIN(p2.ts) FROM payments p2 WHERE p2.app_id = i.app_id AND p2.install_id = i.id) AS firstPaymentAt,
-              (SELECT p3.matched_by FROM payments p3 WHERE p3.app_id = i.app_id AND p3.install_id = i.id
+              (SELECT MIN(p2.ts) FROM payments p2 WHERE p2.app_id = i.app_id AND p2.install_id = i.id${sb2}) AS firstPaymentAt,
+              (SELECT p3.matched_by FROM payments p3 WHERE p3.app_id = i.app_id AND p3.install_id = i.id AND p3.kind = 'payment'${sb3}
                  ORDER BY p3.ts DESC, p3.id DESC LIMIT 1) AS matchedBy
        FROM payments p JOIN installs i ON i.app_id = p.app_id AND i.id = p.install_id
        WHERE p.app_id = ? AND p.ts >= ? AND p.ts < ?${ctx.sandbox}${filter.where}

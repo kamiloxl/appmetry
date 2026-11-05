@@ -53,7 +53,7 @@ describe('customers', () => {
   it('lists paying installs sorted by total desc with matchedBy and time to convert', async () => {
     const { id, ids } = await seeded();
     await env.DB.prepare(`UPDATE payments SET matched_by = 'attribute' WHERE id = ?`).bind(ids.payments.adsSearch).run();
-    await env.DB.prepare(`UPDATE payments SET matched_by = 'user_id' WHERE id = ?`).bind(ids.payments.tiktokRefund).run();
+    await env.DB.prepare(`UPDATE payments SET matched_by = 'user_id' WHERE id = ?`).bind(ids.payments.tiktokDirect).run();
     await env.DB.prepare(`UPDATE installs SET email = 'a@b.co' WHERE id = ?`).bind(ids.installs.ads).run();
     const rows = await (await call(`/api/apps/${id}/stats/customers?range=30d`, { cookie })).json<Customer[]>();
     expect(rows.map((r) => r.installId)).toEqual([ids.installs.ads, ids.installs.tiktok]);
@@ -144,5 +144,61 @@ describe('link funnel', () => {
     expect(rows[0]).toMatchObject({ linkId: 'l1', name: 'One', clicks: 4, androidClicks: 1, iosClicks: 3, installs: 2, revenue: 999 - 999 + 1999 });
     expect(rows[1]).toMatchObject({ clicks: 1, installs: 0, revenue: 0 });
     expect(rows[2]).toMatchObject({ clicks: 0, androidClicks: 0, iosClicks: 0, installs: 0, revenue: 0 });
+  });
+});
+
+describe('link funnel revenue attribution', () => {
+  async function setup() {
+    const { id, ids } = await seeded();
+    const t = ids.day;
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO links (id, app_id, slug, name, created_at) VALUES ('l1', ?, 'one', 'One', 1)`).bind(id),
+      // ads: two clicks on l1 by the same install, click_id NULL. organic: one click, payment later.
+      env.DB.prepare(
+        `INSERT INTO link_clicks (id, link_id, app_id, ts, platform, install_id) VALUES
+         ('c1','l1',?,?, 'ios', ?), ('c2','l1',?,?, 'ios', ?), ('c3','l1',?,?, 'ios', ?)`,
+      ).bind(id, t, ids.installs.ads, id, t + 1, ids.installs.ads, id, t, ids.installs.organic),
+    ]);
+    return { id, ids };
+  }
+  const links = async (id: string, qs = '') => (await call(`/api/apps/${id}/stats/links?${qs}`, { cookie })).json<LinkRow[]>();
+
+  it('counts revenue for installs with a null click_id, once per install', async () => {
+    const { id } = await setup();
+    const [row] = await links(id);
+    expect(row).toMatchObject({ clicks: 3, installs: 2, revenue: 1999 });
+  });
+
+  it('excludes sandbox payments and includes payments of every counted install', async () => {
+    const { id, ids } = await setup();
+    await insertPayment(env.DB, id, { id: `${id}_sb`, ts: ids.day + 30 * HOUR, amount: 500, install_id: ids.installs.organic, environment: 'SANDBOX' }).run();
+    expect((await links(id))[0].revenue).toBe(1999);
+    await insertPayment(env.DB, id, { id: `${id}_prod`, ts: ids.day + 31 * HOUR, amount: 700, install_id: ids.installs.organic }).run();
+    expect((await links(id))[0].revenue).toBe(2699);
+  });
+
+  it('404 for unknown app and 400 for bad range', async () => {
+    const { id } = await setup();
+    expect((await call('/api/apps/nope/stats/links', { cookie })).status).toBe(404);
+    expect((await call(`/api/apps/${id}/stats/links?range=bogus`, { cookie })).status).toBe(400);
+  });
+});
+
+describe('timeline unknown app', () => {
+  it('404', async () => {
+    expect((await call('/api/apps/nope/installs/whatever_id', { cookie })).status).toBe(404);
+  });
+});
+
+describe('customers sandbox-aware fields', () => {
+  it('firstPaymentAt and matchedBy ignore sandbox rows and refunds', async () => {
+    const { id, ids } = await seeded();
+    await env.DB.prepare(`UPDATE payments SET matched_by = 'attribute' WHERE id = ?`).bind(ids.payments.adsSearch).run();
+    await insertPayment(env.DB, id, { id: `${id}_early_sb`, ts: ids.day + 12 * HOUR, amount: 100, install_id: ids.installs.ads, environment: 'SANDBOX' }).run();
+    await env.DB.prepare(`UPDATE payments SET matched_by = 'sandbox_match' WHERE id = ?`).bind(`${id}_early_sb`).run();
+    const rows = await (await call(`/api/apps/${id}/stats/customers`, { cookie })).json<Customer[]>();
+    const ads = rows.find((r) => r.installId === ids.installs.ads)!;
+    expect(ads.firstPaymentAt).toBe(ids.day + 24 * HOUR + 2 * HOUR);
+    expect(ads.matchedBy).toBe('attribute');
   });
 });

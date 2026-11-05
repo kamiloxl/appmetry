@@ -35,12 +35,13 @@ export async function linkFunnel(ctx: StatsCtx): Promise<LinkFunnelRow[]> {
     db
       .prepare(
         `SELECT c.link_id, SUM(p.amount) AS revenue
-         FROM payments p
-         JOIN installs i ON i.app_id = p.app_id AND i.id = p.install_id
-         JOIN link_clicks c ON c.app_id = p.app_id AND c.id = i.click_id
-         WHERE p.app_id = ? AND p.ts >= ? AND p.ts < ? AND c.ts >= ? AND c.ts < ?${ctx.sandbox}${f} GROUP BY c.link_id`,
+         FROM (SELECT DISTINCT link_id, install_id FROM link_clicks
+               WHERE app_id = ? AND ts >= ? AND ts < ? AND install_id IS NOT NULL) c
+         JOIN payments p ON p.app_id = ? AND p.install_id = c.install_id
+         LEFT JOIN installs i ON i.app_id = p.app_id AND i.id = p.install_id
+         WHERE p.ts >= ? AND p.ts < ?${ctx.sandbox}${f} GROUP BY c.link_id`,
       )
-      .bind(app.id, range.from, range.to, range.from, range.to, ...filter.binds),
+      .bind(app.id, range.from, range.to, app.id, range.from, range.to, ...filter.binds),
   ]);
   const by = <T extends { link_id: string }>(r: { results: unknown[] }) => new Map((r.results as T[]).map((x) => [x.link_id, x]));
   const cm = by<{ link_id: string; clicks: number; android: number; ios: number }>(clicks);
