@@ -19,6 +19,7 @@ import type { AppEnv, Env } from './env';
 import { handleAttribution } from './attribution';
 import { handleBatch } from './ingest';
 import { passwordsMatch } from './lib/crypto';
+import { handleRevenueCat, revenuecatRoutes } from './revenuecat';
 
 const app = new Hono<AppEnv>();
 
@@ -32,6 +33,10 @@ app.use('/api/*', apiGuard);
 
 app.post('/api/v1/batch', handleBatch);
 app.get('/api/v1/attribution', handleAttribution);
+
+// ---------- RevenueCat webhook (public to apiGuard; authenticates with the per-app webhook secret)
+
+app.post('/api/webhooks/revenuecat/:appId', handleRevenueCat);
 
 // ---------- login
 
@@ -76,6 +81,7 @@ app.get('/api/auth/me', async (c) => c.json({ loggedIn: await isLoggedIn(c) }));
 
 app.route('/', appsRoutes);
 app.route('/', linksRoutes);
+app.route('/', revenuecatRoutes);
 
 // ---------- fallbacks
 

@@ -120,7 +120,6 @@ describe('password login', () => {
     for (const [method, path] of [
       ['POST', '/api/v1/batch'],
       ['OPTIONS', '/api/v1/batch'],
-      ['POST', '/api/webhooks/revenuecat/app1'],
     ]) {
       const res = await call(path, { method });
       expect(res.status, `${method} ${path}`).not.toBe(401);
@@ -130,6 +129,9 @@ describe('password login', () => {
     // The attribution route authenticates with the app key itself: its 401 is its own, not the session guard's.
     const attr = await call('/api/v1/attribution?iid=whatever-1', { method: 'GET' });
     expect(await attr.json()).toEqual({ error: 'unknown_app_key' });
+    // Same for the RevenueCat webhook, which checks the per-app webhook secret.
+    const hook = await call('/api/webhooks/revenuecat/app1', { method: 'POST' });
+    expect(await hook.json()).toEqual({ error: 'invalid_webhook_secret' });
   });
 
   it('rejects a tampered cookie', async () => {

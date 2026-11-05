@@ -49,7 +49,7 @@ const APP_KEY_RE = /^app_[0-9a-z]{8,64}$/;
 type Failure = { status: 400 | 401 | 403 | 413 | 429; error: string };
 
 /** Read the body as text, giving up as soon as it passes `max` bytes (chunked bodies have no content-length). */
-async function readCapped(req: Request, max: number): Promise<string | null> {
+export async function readCapped(req: Request, max: number): Promise<string | null> {
   if (!req.body) return '';
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
