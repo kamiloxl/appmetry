@@ -12,6 +12,7 @@ import {
   purgeLoginFailures,
   setSession,
 } from './auth';
+import { appsRoutes } from './apps';
 import type { AppEnv, Env } from './env';
 import { passwordsMatch } from './lib/crypto';
 
@@ -61,8 +62,7 @@ app.get('/api/auth/me', async (c) => c.json({ loggedIn: await isLoggedIn(c) }));
 
 // ---------- dashboard API (login required by apiGuard)
 
-// Task 5 lists the apps.
-app.get('/api/apps', (c) => c.json([]));
+app.route('/', appsRoutes);
 
 // ---------- fallbacks
 
