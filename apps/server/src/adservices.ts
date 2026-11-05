@@ -6,6 +6,8 @@ const ENDPOINT = 'https://api-adservices.apple.com/api/v1/';
 /** 404 means Apple has not produced the attribution yet: wait and try again, three attempts in total. */
 const MAX_ATTEMPTS = 3;
 const NOT_READY_WAIT_MS = 5000;
+/** A hanging Apple call counts as `retry`, so the waitUntil work cannot outlive its window. */
+const FETCH_TIMEOUT_MS = 5000;
 
 const defaultSleep = (ms: number): Promise<void> =>
   typeof scheduler !== 'undefined' ? scheduler.wait(ms) : new Promise((resolve) => setTimeout(resolve, ms));
@@ -19,7 +21,7 @@ export async function exchangeAdServicesToken(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let res: Response;
     try {
-      res = await fetchFn(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: token });
+      res = await fetchFn(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: token, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     } catch {
       return { status: 'retry' };
     }

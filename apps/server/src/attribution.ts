@@ -87,8 +87,8 @@ export interface AsaDeps {
 }
 
 /**
- * Exchange an AdServices token and store the outcome. `ok` and `invalid` clear the pending fields; `retry` keeps the
- * token (the only place it is ever stored) until `pendingUntil`. Exported for the Task 12 cron that retries pending tokens.
+ * Exchange an AdServices token and store the outcome. `ok` (after applying) and `invalid` clear the pending fields;
+ * `retry` keeps the token (the only place it is ever stored) until `pendingUntil`. If applying throws, the fields stay set. Exported for the Task 12 cron that retries pending tokens.
  */
 export async function resolveAsaToken(
   db: D1Database, appId: string, installId: string, token: string, pendingUntil: number, deps: AsaDeps = {},
@@ -131,8 +131,15 @@ export function makeOnInstall(
     if (inst.platform !== 'ios' || typeof token !== 'string' || !token) return;
     if (inst.attribution_method === 'search_ads' || inst.attribution_method === 'install_referrer') return;
     if (inst.asa_pending_token && (inst.asa_pending_until ?? 0) > now) return;
+    // Persist the token first (synchronously, before waitUntil) so a dead isolate or cancelled waitUntil never loses it;
+    // the cron retries it. The skip check above ran before this write, so it does not skip our own exchange.
+    const pendingUntil = ev.ts + DAY;
+    await db
+      .prepare('UPDATE installs SET asa_pending_token = ?, asa_pending_until = ? WHERE app_id = ? AND id = ?')
+      .bind(token, pendingUntil, app.id, installId)
+      .run();
     waitUntil(
-      resolveAsaToken(db, app.id, installId, token, ev.ts + DAY, deps).catch((err) => {
+      resolveAsaToken(db, app.id, installId, token, pendingUntil, deps).catch((err) => {
         console.error('AdServices attribution failed', err instanceof Error ? err.message : 'unknown error');
       }),
     );

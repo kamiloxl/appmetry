@@ -160,6 +160,16 @@ describe('exchangeAdServicesToken', () => {
     expect(calls).toHaveLength(3);
   });
 
+  it('passes a timeout signal, and a timeout/abort gives retry', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    await exchangeAdServicesToken('tok', fakeFetch(200, { attribution: false }, calls), async () => {});
+    expect(calls[0].init?.signal).toBeInstanceOf(AbortSignal);
+    for (const name of ['TimeoutError', 'AbortError']) {
+      const f = (async () => { throw new DOMException('t', name); }) as unknown as typeof fetch;
+      expect(await exchangeAdServicesToken('tok', f, async () => {})).toEqual({ status: 'retry' });
+    }
+  });
+
   it('400 gives invalid', async () => {
     expect(await exchangeAdServicesToken('tok', fakeFetch(400), async () => {})).toEqual({ status: 'invalid' });
   });
@@ -209,6 +219,53 @@ describe('Apple Search Ads', () => {
     await ingest(app, 'ios', iid, [e], fakeFetch(200, { attribution: true, campaignId: 1 }, calls));
     expect(calls).toHaveLength(0);
     expect(await row(app, iid)).toMatchObject({ asa_pending_token: 'tok-d', attribution_method: 'organic' });
+  });
+
+  it('sets the pending token before the exchange settles, and ok clears it', async () => {
+    const app = await createApp(cookie);
+    const iid = newIid();
+    await ingest(app, 'ios', iid, [installEv({})], fakeFetch(500)); // create the install row
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow = (async () => { await gate; return new Response(JSON.stringify({ attribution: true, campaignId: 3 }), { status: 200 }); }) as unknown as typeof fetch;
+    const pending: Promise<unknown>[] = [];
+    const e = installEv({ asaToken: 'tok-g' });
+    await makeOnInstall(env.DB, app, (p) => void pending.push(p), Date.now(), { fetchFn: slow, sleep: async () => {} })(iid, e);
+    expect(await row(app, iid)).toMatchObject({ asa_pending_token: 'tok-g', asa_pending_until: e.ts + DAY, attribution_method: 'organic' });
+    release();
+    await Promise.all(pending);
+    expect(await row(app, iid)).toMatchObject({ asa_pending_token: null, asa_pending_until: null, attribution_method: 'search_ads' });
+  });
+
+  it('a throwing apply leaves the pending token set', async () => {
+    const app = await createApp(cookie);
+    const iid = newIid();
+    await ingest(app, 'ios', iid, [installEv({})], fakeFetch(500));
+    const failing = new Proxy(env.DB, {
+      get(t, k) {
+        if (k === 'prepare') return (q: string) => { if (q.startsWith('UPDATE installs SET attribution_method')) throw new Error('d1 down'); return t.prepare(q); };
+        const v = Reflect.get(t, k);
+        return typeof v === 'function' ? v.bind(t) : v;
+      },
+    }) as D1Database;
+    const pending: Promise<unknown>[] = [];
+    const e = installEv({ asaToken: 'tok-h' });
+    await makeOnInstall(failing, app, (p) => void pending.push(p), Date.now(), { fetchFn: fakeFetch(200, { attribution: true, campaignId: 1 }), sleep: async () => {} })(iid, e);
+    await Promise.all(pending);
+    expect(await row(app, iid)).toMatchObject({ asa_pending_token: 'tok-h', attribution_method: 'organic' });
+  });
+
+  it('skips the exchange when already attributed via search_ads or install_referrer', async () => {
+    for (const method of ['search_ads', 'install_referrer']) {
+      const app = await createApp(cookie);
+      const iid = newIid();
+      await ingest(app, 'ios', iid, [installEv({})], fakeFetch(500));
+      await env.DB.prepare('UPDATE installs SET attribution_method = ? WHERE app_id = ? AND id = ?').bind(method, app.id, iid).run();
+      const calls: Array<{ url: string }> = [];
+      await ingest(app, 'ios', iid, [installEv({ asaToken: 'tok-i' })], fakeFetch(200, { attribution: true, campaignId: 1 }, calls));
+      expect(calls, method).toHaveLength(0);
+      expect(await row(app, iid), method).toMatchObject({ attribution_method: method, asa_pending_token: null });
+    }
   });
 
   it('search_ads does not override install_referrer', async () => {
