@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Worker code: Workers runtime types only, no DOM and no Node.
+    "lib": ["ES2023"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
+  },
+  // vitest.config.ts runs in Node, not in the Worker, so it is not checked against Workers types.
+  "include": ["src", "test"]
+}

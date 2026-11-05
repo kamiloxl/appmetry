@@ -6,6 +6,19 @@
   "scripts": {
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "build": "pnpm -r build"
+    "build": "pnpm --filter @appdash/dashboard --if-present build",
+    "predev": "node scripts/ensure-dist.mjs && wrangler d1 migrations apply DB --local",
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "~4.157.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "ADMIN_PASSWORD": {
+        "description": "At least 12 characters. You'll use it to log in to the dashboard."
+      }
+    }
   }
 }
