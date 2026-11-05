@@ -39,7 +39,6 @@ mobile data log/                 (pnpm workspaces, TypeScript everywhere, MIT)
 ├─ packages/sdk-expo             @appdash/expo — published to npm
 │   ├─ src/                      queue, sessions, screens, public API, Expo Router provider
 │   ├─ ios/ android/             Expo Module "AppdashAttribution": AdServices token / Install Referrer
-│   └─ plugin/                   Expo config plugin (adds com.android.installreferrer dependency)
 ├─ packages/shared               payload types + validation, source classification, friendly names
 ├─ apps/server                   Hono on Cloudflare Workers + D1; also serves the dashboard as static assets
 ├─ apps/dashboard                React + Vite + Tailwind + Recharts
@@ -77,7 +76,7 @@ Appdash.track('paywall_shown', { variant: 'b' });
 Appdash.identify({ userId: 'u_123', email?: string, name?: string });
 Appdash.reportSource('tiktok');                  // answer from the app's own "how did you hear about us?" UI
 Appdash.optIn(); Appdash.optOut();               // persisted; optOut clears the queue
-await Appdash.installId();                       // for RevenueCat: Purchases.setAttributes({ $appdashInstallId: id })
+await Appdash.installId();                       // for RevenueCat: Purchases.setAttributes({ appdash_install_id: id })
 await Appdash.flush();
 ```
 
@@ -107,7 +106,7 @@ await Appdash.flush();
 
 - iOS: `AAAttribution.attributionToken()` (iOS 14.3+), returns `null` on error / unsupported.
 - Android: `InstallReferrerClient` → `{ referrer, clickTs, installTs }`, returns `null` on error; called once.
-- Config plugin adds `com.android.installreferrer:installreferrer` to the Android build. Requires a dev build.
+- The module's own `build.gradle` adds `com.android.installreferrer:installreferrer:2.2` and its podspec weak-links `AdServices`, so no config plugin is needed. Requires a dev build.
 
 ## 4. Server (`apps/server`)
 
@@ -203,7 +202,7 @@ Counted event types: `INITIAL_PURCHASE`, `RENEWAL`, `NON_RENEWING_PURCHASE` (pay
 Exact field names are verified against RevenueCat's webhook docs during implementation.
 
 Match order → `matched_by`:
-1. `subscriber_attributes.$appdashInstallId.value` → `attribute`
+1. `subscriber_attributes.appdash_install_id.value` → `attribute`
 2. `app_user_id`, `original_app_user_id` or `aliases[]` equals `installs.user_id` (most recent install) → `user_id`
 3. `app_user_id` equals an install id → `install_id`
 4. else `install_id = NULL`, `matched_by = 'none'` (counts in revenue totals, no source)
