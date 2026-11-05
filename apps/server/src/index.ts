@@ -25,10 +25,14 @@ import { isDim, statsContext, type StatsCtx } from './stats/filters';
 import { linkFunnel } from './stats/links';
 import { overview } from './stats/overview';
 import { runDaily } from './cron';
+import { notFound, onError, securityHeaders } from './errors';
 import { privacyRoutes } from './privacy';
 import { handleRevenueCat, revenuecatRoutes } from './revenuecat';
 
 const app = new Hono<AppEnv>();
+
+// First, so the headers land on every response: API, webhooks, redirects, 404s and errors.
+app.use('*', securityHeaders);
 
 // The SDK API is called from apps (and Expo web), never with cookies: any origin, app key header only.
 app.use('/api/v1/*', cors({ origin: '*', allowMethods: ['POST', 'GET', 'OPTIONS'], allowHeaders: ['X-App-Key', 'Content-Type'], maxAge: 86_400 }));
@@ -126,13 +130,8 @@ app.get('/api/apps/:id/stats/breakdown', async (c) => {
 
 // ---------- fallbacks
 
-app.notFound((c) => c.json({ error: 'not found' }, 404));
-
-// No stack traces in responses (spec §8, A02).
-app.onError((err, c) => {
-  console.error(err);
-  return c.json({ error: 'internal error' }, 500);
-});
+app.notFound(notFound);
+app.onError(onError);
 
 async function scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
   // Independent jobs: one failing must not stop the other.
