@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 beforeEach(() => resetDeepLinksForTests());
 
-function setup(initialUrl: string | null = null, opts: { clockStep?: number } = {}) {
+function setup(initialUrl: string | null = null, opts: { clockStep?: number; getInitialURL?: () => Promise<string | null> } = {}) {
   const kv = new MemoryKV();
   const bodies: Batch[] = [];
   const fetchFn = jest.fn(async (_u: unknown, init?: RequestInit) => {
@@ -39,7 +39,7 @@ function setup(initialUrl: string | null = null, opts: { clockStep?: number } = 
   let urlListener: ((e: { url: string }) => void) | null = null;
   const remove = jest.fn(() => { urlListener = null; });
   const linking = {
-    getInitialURL: jest.fn(async () => initialUrl),
+    getInitialURL: jest.fn(opts.getInitialURL ?? (async () => initialUrl)),
     addEventListener: jest.fn((_: 'url', cb: (e: { url: string }) => void) => {
       urlListener = cb;
       return { remove };
@@ -131,6 +131,38 @@ describe('deep links', () => {
     expect(a.linking.getInitialURL).toHaveBeenCalledTimes(1);
     expect(a.links()).toHaveLength(1); // the one from the first activation; no second copy
     expect(a.linking.addEventListener).toHaveBeenCalledTimes(2);
+  });
+
+  it('initial url resolving after optOut is delivered once after optIn', async () => {
+    const url = 'myapp://x?utm_source=a';
+    let resolveFirst!: (v: string | null) => void;
+    let calls = 0;
+    const a = setup(url, {
+      getInitialURL: () => (++calls === 1 ? new Promise<string | null>((r) => { resolveFirst = r; }) : Promise.resolve(url)),
+    });
+    a.api.init(init);
+    await settle();
+    a.api.optOut();
+    resolveFirst(url);
+    await settle();
+    a.api.optIn();
+    await settle();
+    await a.api.flush();
+    expect(a.links()).toHaveLength(1);
+  });
+
+  it('initial url is retried after getInitialURL rejects', async () => {
+    const url = 'myapp://x?utm_source=a';
+    let calls = 0;
+    const a = setup(url, { getInitialURL: () => (++calls === 1 ? Promise.reject(new Error('boom')) : Promise.resolve(url)) });
+    a.api.init(init);
+    await settle();
+    a.api.optOut();
+    await settle();
+    a.api.optIn();
+    await settle();
+    await a.api.flush();
+    expect(a.links()).toHaveLength(1);
   });
 
   it('optOut removes the subscription', async () => {

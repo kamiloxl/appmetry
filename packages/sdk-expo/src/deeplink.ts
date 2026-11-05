@@ -38,10 +38,15 @@ export function startDeepLinks(onLink: (url: string) => void, linking: LinkingLi
   }
 
   if (!initialUrlRead) {
-    initialUrlRead = true;
+    // Marked as read only once the answer arrived while still active, so an opt-out or a failure
+    // before that leaves the launch URL available to the next activation.
     Promise.resolve()
       .then(() => linking.getInitialURL())
-      .then(deliver)
+      .then((url) => {
+        if (stopped) return;
+        initialUrlRead = true;
+        deliver(url);
+      })
       .catch((err: unknown) => log('Linking.getInitialURL failed', err));
   }
 
