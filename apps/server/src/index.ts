@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import {
   apiGuard,
@@ -20,7 +20,9 @@ import { handleAttribution } from './attribution';
 import { handleBatch } from './ingest';
 import { passwordsMatch } from './lib/crypto';
 import { breakdown } from './stats/breakdown';
-import { isDim, statsContext } from './stats/filters';
+import { customers, installTimeline } from './stats/customers';
+import { isDim, statsContext, type StatsCtx } from './stats/filters';
+import { linkFunnel } from './stats/links';
 import { overview } from './stats/overview';
 import { handleRevenueCat, revenuecatRoutes } from './revenuecat';
 
@@ -88,12 +90,25 @@ app.route('/', revenuecatRoutes);
 
 // ---------- stats (read side of the Overview page)
 
-app.get('/api/apps/:id/stats/overview', async (c) => {
-  const row = await getAppById(c.env.DB, c.req.param('id'));
+/** Shared preamble of the stats routes: 404 for an unknown app, 400 for a bad range, else run `fn`. */
+const statsRoute = (fn: (ctx: StatsCtx) => Promise<unknown>) => async (c: Context<AppEnv>) => {
+  const row = await getAppById(c.env.DB, c.req.param('id') ?? '');
   if (!row) return c.json({ error: 'not found' }, 404);
   const ctx = statsContext(c, row);
   if ('error' in ctx) return c.json({ error: ctx.error }, 400);
-  return c.json(await overview(ctx));
+  return c.json(await fn(ctx));
+};
+
+app.get('/api/apps/:id/stats/overview', statsRoute(overview));
+app.get('/api/apps/:id/stats/customers', statsRoute(customers));
+app.get('/api/apps/:id/stats/links', statsRoute(linkFunnel));
+
+app.get('/api/apps/:id/installs/:installId', async (c) => {
+  const row = await getAppById(c.env.DB, c.req.param('id'));
+  if (!row) return c.json({ error: 'not found' }, 404);
+  const res = await installTimeline(c.env.DB, row.id, c.req.param('installId'));
+  if (!res) return c.json({ error: 'not found' }, 404);
+  return c.json(res);
 });
 
 app.get('/api/apps/:id/stats/breakdown', async (c) => {
