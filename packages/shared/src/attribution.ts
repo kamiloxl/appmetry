@@ -68,22 +68,20 @@ export function organic(platform: Platform): InstallAttribution {
 
 export function fromInstallReferrer(raw: string, link: LinkTouch | null): InstallAttribution | null {
   const parsed = touchFromQuery(raw);
-  let t: Touch = parsed;
-  if (link) {
-    t = {
-      ...parsed,
-      utm_source: link.utm_source,
-      utm_medium: link.utm_medium,
-      utm_campaign: link.utm_campaign,
-      utm_term: link.utm_term,
-      utm_content: link.utm_content,
-      ref: link.ref,
-      click_id: link.click_id,
-    };
-  }
-  if (t.utm_source === 'google-play' && t.utm_medium === 'organic') return null;
-  const hasAny = [t.utm_source, t.utm_medium, t.utm_campaign, t.utm_term, t.utm_content, t.ref, t.click_id].some(Boolean);
-  if (!hasAny) return null;
+  const t: Touch = link
+    ? {
+        utm_source: link.utm_source ?? parsed.utm_source,
+        utm_medium: link.utm_medium ?? parsed.utm_medium,
+        utm_campaign: link.utm_campaign ?? parsed.utm_campaign,
+        utm_term: link.utm_term ?? parsed.utm_term,
+        utm_content: link.utm_content ?? parsed.utm_content,
+        ref: link.ref ?? parsed.ref,
+        click_id: link.click_id,
+      }
+    : parsed;
+  if (t.utm_source?.toLowerCase() === 'google-play' && t.utm_medium?.toLowerCase() === 'organic') return null;
+  // Without a source or ref there is nothing to attribute: treat as organic.
+  if (!t.utm_source && !t.ref) return null;
   return fromTouchWith('install_referrer', t);
 }
 

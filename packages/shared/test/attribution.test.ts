@@ -24,6 +24,18 @@ describe('fromInstallReferrer', () => {
     expect(fromInstallReferrer('utm_source=google-play&utm_medium=organic', null)).toBeNull();
     expect(fromInstallReferrer('', null)).toBeNull();
   });
+  it('returns null for click_id-only referrer without link', () => {
+    expect(fromInstallReferrer('click_id=abc', null)).toBeNull();
+  });
+  it('returns null for campaign-only referrer', () => {
+    expect(fromInstallReferrer('utm_campaign=x', null)).toBeNull();
+  });
+  it('link without utm keeps referrer utm_source', () => {
+    expect(fromInstallReferrer('utm_source=tiktok', { click_id: 'c1' })).toMatchObject({ source: 'TikTok', click_id: 'c1' });
+  });
+  it('organic Play marker is case-insensitive', () => {
+    expect(fromInstallReferrer('utm_source=Google-Play&utm_medium=Organic', null)).toBeNull();
+  });
 });
 
 describe('fromAdServices', () => {
