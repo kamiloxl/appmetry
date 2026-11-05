@@ -187,6 +187,37 @@ describe('Flusher', () => {
     expect(queue.size()).toBe(0);
   });
 
+  test('a hung request times out after 30 s; the flusher backs off and stays usable', async () => {
+    let calls = 0;
+    const { queue, fetchFn, flusher } = setup({
+      fetchFn: () => {
+        calls += 1;
+        if (calls === 1) return new Promise<Response>(() => {}); // never settles
+        return Promise.resolve({ status: 202 } as Response);
+      },
+    });
+    current = flusher;
+    await fill(queue, 3);
+
+    let settled = false;
+    const first = flusher.flush();
+    void first.then(() => (settled = true));
+    await jest.advanceTimersByTimeAsync(29_999);
+    expect(settled).toBe(false);
+    expect(flusher.flush()).toBe(first); // still the in-flight run
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(1);
+    expect(settled).toBe(true);
+    expect(queue.size()).toBe(3);
+    expect(flusher.backoffMs()).toBe(4_000);
+
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(queue.size()).toBe(0);
+    expect(flusher.backoffMs()).toBe(2_000);
+  });
+
   test('drop acks the batch', async () => {
     let calls = 0;
     const { queue, fetchFn, flusher, batches } = setup({ status: () => (++calls === 1 ? 400 : 202) });

@@ -47,7 +47,7 @@ describe('Transport', () => {
     await expect(t.send(batch)).resolves.toBe('ok');
   });
 
-  test.each([429, 500, 503])('%i gives retry', async (status) => {
+  test.each([408, 425, 429, 500, 503])('%i gives retry', async (status) => {
     const t = new Transport({ host: 'https://h.example', appKey: 'k', fetchFn: fetchReturning(status) });
     await expect(t.send(batch)).resolves.toBe('retry');
   });
@@ -60,7 +60,42 @@ describe('Transport', () => {
     await expect(t.send(batch)).resolves.toBe('retry');
   });
 
-  test.each([400, 401, 403, 413])('%i gives drop', async (status) => {
+  test('a request that never settles is aborted after 30 s and gives retry', async () => {
+    jest.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const fetchFn = jest.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+        signal = init?.signal ?? undefined;
+        return new Promise<Response>(() => {}); // hangs and ignores the signal
+      });
+      const t = new Transport({ host: 'https://h.example', appKey: 'k', fetchFn });
+      let result: string | undefined;
+      void t.send(batch).then((r) => (result = r));
+
+      await jest.advanceTimersByTimeAsync(29_999);
+      expect(result).toBeUndefined();
+      expect(signal?.aborted).toBe(false);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(result).toBe('retry');
+      expect(signal?.aborted).toBe(true);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test('a completed request leaves no timeout timer behind', async () => {
+    jest.useFakeTimers();
+    try {
+      const t = new Transport({ host: 'https://h.example', appKey: 'k', fetchFn: fetchReturning(202) });
+      await expect(t.send(batch)).resolves.toBe('ok');
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test.each([400, 401, 403, 404, 413])('%i gives drop', async (status) => {
     const t = new Transport({ host: 'https://h.example', appKey: 'k', fetchFn: fetchReturning(status) });
     await expect(t.send(batch)).resolves.toBe('drop');
   });

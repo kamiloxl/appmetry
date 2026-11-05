@@ -3,10 +3,37 @@
   "version": "0.1.0",
   "description": "appdash SDK for Expo apps: offline event queue, sessions and install attribution",
   "main": "build/index.js",
+  "module": "build/index.mjs",
   "types": "build/index.d.ts",
+  "react-native": "build/index.js",
+  "exports": {
+    ".": {
+      "react-native": "./build/index.js",
+      "import": {
+        "types": "./build/index.d.mts",
+        "default": "./build/index.mjs"
+      },
+      "require": {
+        "types": "./build/index.d.ts",
+        "default": "./build/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "build",
+    "ios",
+    "android",
+    "!android/build",
+    "!android/.gradle",
+    "expo-module.config.json",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "build": "tsc --project tsconfig.build.json",
+    "build": "tsup",
     "clean": "rm -rf build",
+    "prepare": "tsup",
     "test": "jest",
     "typecheck": "tsc --noEmit"
   },
@@ -23,9 +50,6 @@
   },
   "homepage": "https://github.com/appdash/appdash#readme",
   "license": "MIT",
-  "dependencies": {
-    "@appdash/shared": "workspace:*"
-  },
   "peerDependencies": {
     "@react-native-async-storage/async-storage": "*",
     "expo": "*",
@@ -38,6 +62,7 @@
     "react-native": "*"
   },
   "devDependencies": {
+    "@appdash/shared": "workspace:*",
     "@babel/core": "^7.26.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native/jest-preset": "0.88.1",
@@ -54,7 +79,8 @@
     "jest-expo": "~58.0.14",
     "react": "19.3.0",
     "react-native": "0.88.1",
-    "typescript": "^7.0.2"
+    "tsup": "^9.0.0",
+    "typescript": "~6.0.3"
   },
   "jest": {
     "preset": "jest-expo",

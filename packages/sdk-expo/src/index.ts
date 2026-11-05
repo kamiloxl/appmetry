@@ -4,3 +4,4 @@ export { Queue, QUEUE_KEY } from './queue';
 export { Transport, type SendResult, type TransportOptions } from './transport';
 export { Flusher, type FlusherOptions, BACKOFF_MIN_MS, BACKOFF_MAX_MS } from './flusher';
 export { setDebug } from './log';
+export type { Batch, BatchContext, SdkEvent } from '@appdash/shared';
