@@ -28,12 +28,12 @@ describe('nextStep', () => {
 });
 
 describe('privacyParagraph', () => {
-  it('mentions retention, the random install id and no advertising id', async () => {
+  it('discloses what is collected, retention and the deletion caveat', async () => {
     const { privacyParagraph } = await import('../src/lib/setup');
     const p = privacyParagraph('Demo', 25);
-    expect(p).toContain('25 months');
-    expect(p).toContain('random install id');
-    expect(p).toContain('IDFA or GAID');
+    for (const t of ['random install id', 'IDFA or GAID', 'device model', 'operating system version', 'country, region and city', 'IP address is not stored', 'screen views', 'tracked links', 'install referrer', 'Apple Search Ads', 'RevenueCat', 'user id', 'email or name', '25 months', 'purchase amounts and link-click counts are kept without']) {
+      expect(p).toContain(t);
+    }
     expect(privacyParagraph('Demo', 1)).toContain('1 month.');
   });
 });

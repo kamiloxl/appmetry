@@ -102,7 +102,8 @@ describe('GET /api/apps/:id/setup', () => {
     const app = await createApp(cookie);
     expect((await patch(app, { step: 'nope', state: 'done' })).status).toBe(400);
     expect((await patch(app, { step: 'privacy', state: 'maybe' })).status).toBe(400);
-    expect((await patch(app, { step: 'app', state: 'skipped' })).status).toBe(200);
+    expect((await patch(app, { step: 'app', state: 'skipped' })).status).toBe(400);
+    expect((await patch(app, { step: 'app', state: 'done' })).status).toBe(400);
     expect((await call(`/api/apps/${app.id}/setup`, { method: 'PATCH', cookie, body: 'not json' })).status).toBe(400);
     expect((await patch(app, { step: '__proto__', state: 'done' })).status).toBe(400);
   });
@@ -110,6 +111,15 @@ describe('GET /api/apps/:id/setup', () => {
   it('setup of another app\'s id is 404', async () => {
     expect((await call('/api/apps/does-not-exist/setup', { cookie })).status).toBe(404);
     expect((await call('/api/apps/does-not-exist/setup', { method: 'PATCH', cookie, json: { step: 'privacy', state: 'done' } })).status).toBe(404);
+  });
+
+  it('app stays done even if a stored state says skipped', async () => {
+    const app = await createApp(cookie);
+    await env.DB.prepare('UPDATE apps SET setup_state = ? WHERE id = ?').bind(JSON.stringify({ app: 'skipped' }), app.id).run();
+    const s = await get(app);
+    expect(s.steps.app).toMatchObject({ done: true });
+    expect(s.steps.app.skipped).toBeUndefined();
+    expect(s.current).toBe('firstEvent');
   });
 
   it('PATCH setup does not touch other app columns', async () => {

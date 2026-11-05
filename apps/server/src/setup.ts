@@ -25,7 +25,9 @@ function parseStored(json: string | null | undefined): Stored {
     const v: unknown = JSON.parse(json);
     if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
     const out: Stored = {};
+    // `app` is always done once the app exists, so nothing is ever stored for it.
     for (const k of SETUP_STEPS) {
+      if (k === 'app') continue;
       const s = (v as Record<string, unknown>)[k];
       if (s === 'done' || s === 'skipped') out[k] = s;
     }
@@ -96,6 +98,7 @@ setupRoutes.patch('/api/apps/:id/setup', async (c) => {
   if (!app) return c.json({ error: 'not found' }, 404);
   const body = (await c.req.json().catch(() => null)) as { step?: unknown; state?: unknown } | null;
   const step = SETUP_STEPS.find((k) => k === body?.step);
+  if (body?.step === 'app') return c.json({ error: 'the app step is always done' }, 400);
   const state = body?.state;
   if (!step) return c.json({ error: `step must be one of ${SETUP_STEPS.join(', ')}` }, 400);
   if (state !== 'done' && state !== 'skipped' && state !== 'reset') return c.json({ error: 'state must be done, skipped or reset' }, 400);

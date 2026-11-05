@@ -35,8 +35,11 @@ export function progressLabel(s: SetupStatus): string {
   return `Setup ${progressCount(s)}/${SETUP_STEPS.length}`;
 }
 
-/** The privacy-policy template of step 6. A starting point the deployer must review; not legal advice. */
+/**
+ * The privacy-policy template of step 6. It lists what appdash collects so the deployer can paste it into a policy.
+ * A starting point the deployer must review; not legal advice.
+ */
 export function privacyParagraph(appName: string, retentionMonths: number): string {
   const months = `${retentionMonths} month${retentionMonths === 1 ? '' : 's'}`;
-  return `${appName} uses appdash, an analytics tool that we host ourselves on Cloudflare, to measure installs, sessions, screen views and purchases. It identifies an installation with a random install id generated on your device. It does not use your advertising identifier (IDFA or GAID). We keep this data for ${months}. You can ask us to delete the data linked to you at any time.`;
+  return `${appName} uses appdash, an analytics tool that the developer hosts on their own Cloudflare account, to understand how the app is used and which marketing works. It collects: a random install id generated on your device (it does not use your advertising identifier, IDFA or GAID); your device model, operating system version, app version, language and timezone; and your approximate location at country, region and city level, worked out from your network request (your IP address is not stored). It records sessions, screen views and custom events. For attribution it records campaign and source details from tracked links, the Google Play install referrer and Apple Search Ads. Subscription and purchase events from RevenueCat are linked to your install id. If you sign in, a user id, and your email or name only if the app chooses to send them, may also be stored. Data is kept for ${months}. You can ask us to delete the data linked to you; purchase amounts and link-click counts are kept without any information that identifies you.`;
 }

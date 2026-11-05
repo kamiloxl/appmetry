@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import type { SetupStatus } from './types';
 
@@ -12,17 +12,34 @@ export function useSetupStatus(appId: string | null, poll = false) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // `seq` numbers every write to `status`. A poll applies its answer only if nothing newer (another poll or a PATCH
+  // result set through `setNewest`) was applied since it started; `inFlight` stops polls from overlapping.
+  const seq = useRef(0);
+  const inFlight = useRef(false);
+
+  const setNewest = useCallback((s: SetupStatus) => {
+    seq.current += 1;
+    setStatus(s);
+  }, []);
+
   const refresh = useCallback(async () => {
-    if (!appId) return;
+    if (!appId || inFlight.current) return;
+    inFlight.current = true;
+    const mine = seq.current;
     try {
-      setStatus(await api<SetupStatus>(`/api/apps/${appId}/setup`));
+      const s = await api<SetupStatus>(`/api/apps/${appId}/setup`);
+      if (seq.current === mine) setNewest(s);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'failed');
+    } finally {
+      inFlight.current = false;
     }
-  }, [appId]);
+  }, [appId, setNewest]);
 
   useEffect(() => {
+    seq.current += 1;
+    inFlight.current = false;
     setStatus(null);
     void refresh();
   }, [refresh]);
@@ -51,5 +68,5 @@ export function useSetupStatus(appId: string | null, poll = false) {
     };
   }, [poll, appId, refresh]);
 
-  return { status, setStatus, error, refresh };
+  return { status, setStatus: setNewest, error, refresh };
 }
