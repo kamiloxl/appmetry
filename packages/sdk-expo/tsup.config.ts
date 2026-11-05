@@ -8,6 +8,7 @@ export default defineConfig({
   format: ['cjs', 'esm'],
   target: 'es2020',
   platform: 'neutral',
+  external: ['react', 'react-native', 'expo-router', 'expo-linking', /^expo(-.*)?$/, /^@react-native/],
   noExternal: ['@appdash/shared'],
   dts: { resolve: ['@appdash/shared', /^\.\.?\//] },
   sourcemap: true,

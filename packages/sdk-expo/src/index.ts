@@ -6,3 +6,4 @@ export { Flusher, type FlusherOptions, BACKOFF_MIN_MS, BACKOFF_MAX_MS } from './
 export { SessionTracker } from './session';
 export { setDebug } from './log';
 export type { Batch, BatchContext, SdkEvent } from '@appdash/shared';
+export { AppdashProvider } from './provider';

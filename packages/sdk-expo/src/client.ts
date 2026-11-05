@@ -1,8 +1,9 @@
-import type { BatchContext, EventType, SdkEvent } from '@appdash/shared';
+import { extractTouch, LIMITS, stripPrivateParams, type BatchContext, type EventType, type SdkEvent } from '@appdash/shared';
 import { randomUUID } from 'expo-crypto';
 import { AppState } from 'react-native';
 
 import { buildContext, mobilePlatform } from './context';
+import { startDeepLinks, type LinkingLike } from './deeplink';
 import { Flusher } from './flusher';
 import { log, setDebug } from './log';
 import { collectInstallProps } from './native';
@@ -34,11 +35,17 @@ export interface AppdashApi {
   flush(): Promise<void>;
 }
 
+/** Internal surface: not part of the documented public API. */
+export interface AppdashInternal extends AppdashApi {
+  deepLink(url: string): void;
+}
+
 const KEY_IID = 'appdash:iid';
 const KEY_CONSENT = 'appdash:consent';
 const KEY_INSTALLED = 'appdash:installed';
 const DEFAULT_SESSION_TIMEOUT_MS = 5 * 60_000;
 const MAX_NAME = 255;
+const DEEP_LINK_DEDUP_MS = 2000;
 const MAX_SOURCE = 100;
 const MAX_USER_ID = 200;
 const MAX_PROPS_CHARS = 1024;
@@ -54,6 +61,7 @@ export interface AppdashDeps {
   newId?: () => string;
   now?: () => number;
   os?: string;
+  linking?: LinkingLike;
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => {
@@ -68,7 +76,7 @@ const clean = (v: unknown, max: number): string | undefined => {
   return t === '' ? undefined : t;
 };
 
-export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
+export function createAppdash(deps: AppdashDeps = {}): AppdashInternal {
   const now = deps.now ?? Date.now;
   const newId = deps.newId ?? randomUUID;
 
@@ -91,6 +99,8 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
   let activated = false; // iid exists, flusher running, listener attached
   let iid: string | null = null;
   let subscription: { remove(): void } | null = null;
+  let stopDeepLinks: (() => void) | null = null;
+  let lastLink: { url: string; ts: number } | null = null;
 
   const appState = () => deps.appState ?? (AppState as unknown as NonNullable<AppdashDeps['appState']>);
 
@@ -196,6 +206,8 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
     if (!alive()) return;
     subscription?.remove();
     subscription = appState().addEventListener('change', onAppState);
+    stopDeepLinks?.();
+    stopDeepLinks = startDeepLinks((url) => api.deepLink(url), deps.linking);
     flusher.start();
     void flusher.flush(); // start() alone would not retry a batch that failed before an opt-out
   }
@@ -208,7 +220,7 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
     else log('no consent: collection is off');
   }
 
-  return {
+  const api: AppdashInternal = {
     init(o) {
       try {
         if (initialized) {
@@ -278,6 +290,19 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
       });
     },
 
+    deepLink(url) {
+      const ts = now();
+      void run(() => {
+        if (typeof url !== 'string' || !extractTouch(url)) return;
+        const cleaned = stripPrivateParams(url).slice(0, LIMITS.maxUrl);
+        if (!enabled || !activated) return;
+        // Some platforms deliver the same link as the initial URL and as a url event.
+        if (lastLink && lastLink.url === cleaned && ts - lastLink.ts < DEEP_LINK_DEDUP_MS) return;
+        lastLink = { url: cleaned, ts };
+        return emit('deep_link', ts, { name: cleaned });
+      });
+    },
+
     identify(p) {
       const ts = now();
       void run(() => {
@@ -321,6 +346,9 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
         flusher.stop(); // also aborts the request in flight and drops its result
         subscription?.remove();
         subscription = null;
+        stopDeepLinks?.();
+        stopDeepLinks = null;
+        lastLink = null;
         iid = null;
         // Privacy reset: the next opt-in is a fresh install with a fresh session.
         tracker = new SessionTracker(opts.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS, newId);
@@ -347,6 +375,7 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
       if (f) await f.flush();
     },
   };
+  return api;
 }
 
 /** The app-wide instance. */
