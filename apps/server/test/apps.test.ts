@@ -22,7 +22,7 @@ describe('apps API', () => {
 
   it('creates app with app_ key', async () => {
     const app = await createApp(cookie);
-    expect(app.app_key).toMatch(/^app_[0-9a-z]+$/);
+    expect(app.app_key).toMatch(/^app_[0-9a-z]{32}$/);
     expect(app.name).toBe('Test App');
     expect(app.timezone).toBe('UTC');
     const list = await (await call('/api/apps', { cookie })).json<Array<AppRow & { has_rc_secret: boolean }>>();
@@ -73,7 +73,7 @@ describe('apps API', () => {
     const res = await call(`/api/apps/${app.id}/rc-secret`, { method: 'POST', cookie });
     expect(res.status).toBe(200);
     const { secret } = await res.json<{ secret: string }>();
-    expect(secret.length).toBeGreaterThanOrEqual(24);
+    expect(secret).toMatch(/^rcw_[0-9a-z]{48}$/);
     const hash = await env.DB.prepare('SELECT rc_secret_hash FROM apps WHERE id = ?').bind(app.id).first<string>('rc_secret_hash');
     expect(hash).toBe(await sha256Hex(secret));
     const listText = await (await call('/api/apps', { cookie })).text();

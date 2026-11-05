@@ -108,7 +108,7 @@ appsRoutes.post('/api/apps', async (c) => {
   const row: AppRow = {
     id: randomId(12),
     name: name.value as string,
-    app_key: `app_${randomId(12)}`,
+    app_key: `app_${randomId(16)}`,
     ios_bundle_id: null,
     android_package: null,
     app_store_url: null,
@@ -159,7 +159,7 @@ appsRoutes.post('/api/apps/:id/rc-secret', async (c) => {
   const existing = await c.env.DB.prepare('SELECT * FROM apps WHERE id = ?').bind(c.req.param('id')).first<AppRow>();
   if (!existing) return c.json({ error: 'not found' }, 404);
   // Shown once. Only the hash is stored.
-  const secret = `rcs_${randomId(16)}`;
+  const secret = `rcw_${randomId(24)}`;
   await c.env.DB.prepare('UPDATE apps SET rc_secret_hash = ? WHERE id = ?')
     .bind(await sha256Hex(secret), existing.id)
     .run();
