@@ -7,20 +7,24 @@ const toMs = (seconds: unknown): number | undefined => {
   return ms > 0 ? ms : undefined;
 };
 
+type Deps = { module: typeof AppdashAttributionModule; os: string };
+
 /**
  * Install-time attribution inputs: Apple AdServices token (iOS) or Play Install
  * Referrer (Android). Keys without a value are omitted. Never throws.
  */
-export async function collectInstallProps(): Promise<Record<string, unknown>> {
+export async function collectInstallProps(
+  deps: Deps = { module: AppdashAttributionModule, os: Platform.OS },
+): Promise<Record<string, unknown>> {
   try {
-    const mod = AppdashAttributionModule;
+    const mod = deps.module;
     if (!mod) return {};
     const props: Record<string, unknown> = {};
 
-    if (Platform.OS === 'ios') {
+    if (deps.os === 'ios') {
       const token = await mod.getAdServicesToken?.();
       if (typeof token === 'string' && token.length > 0) props.asaToken = token;
-    } else if (Platform.OS === 'android') {
+    } else if (deps.os === 'android') {
       const r = await mod.getInstallReferrer?.();
       if (r) {
         if (typeof r.referrer === 'string' && r.referrer.length > 0) props.referrer = r.referrer;

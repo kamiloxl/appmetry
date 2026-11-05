@@ -35,9 +35,10 @@ class AppdashAttributionModule : Module() {
 
     fun finish(value: Map<String, Any>?) {
       if (!done.compareAndSet(false, true)) return
+      handler.removeCallbacksAndMessages(null)
       try {
         client?.endConnection()
-      } catch (_: Exception) {
+      } catch (e: Exception) {
       }
       promise.resolve(value)
     }
@@ -62,7 +63,7 @@ class AppdashAttributionModule : Module() {
                 "installTs" to details.installBeginTimestampSeconds.toDouble()
               )
             )
-          } catch (_: Exception) {
+          } catch (e: Exception) {
             finish(null)
           }
         }
@@ -72,7 +73,7 @@ class AppdashAttributionModule : Module() {
           finish(null)
         }
       })
-    } catch (_: Exception) {
+    } catch (e: Exception) {
       finish(null)
     }
   }
