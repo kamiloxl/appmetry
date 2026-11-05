@@ -15,10 +15,13 @@ import {
 } from './auth';
 import { appsRoutes } from './apps';
 import { linksRoutes } from './links';
-import type { AppEnv, Env } from './env';
+import { getAppById, type AppEnv, type Env } from './env';
 import { handleAttribution } from './attribution';
 import { handleBatch } from './ingest';
 import { passwordsMatch } from './lib/crypto';
+import { breakdown } from './stats/breakdown';
+import { isDim, statsContext } from './stats/filters';
+import { overview } from './stats/overview';
 import { handleRevenueCat, revenuecatRoutes } from './revenuecat';
 
 const app = new Hono<AppEnv>();
@@ -82,6 +85,26 @@ app.get('/api/auth/me', async (c) => c.json({ loggedIn: await isLoggedIn(c) }));
 app.route('/', appsRoutes);
 app.route('/', linksRoutes);
 app.route('/', revenuecatRoutes);
+
+// ---------- stats (read side of the Overview page)
+
+app.get('/api/apps/:id/stats/overview', async (c) => {
+  const row = await getAppById(c.env.DB, c.req.param('id'));
+  if (!row) return c.json({ error: 'not found' }, 404);
+  const ctx = statsContext(c, row);
+  if ('error' in ctx) return c.json({ error: ctx.error }, 400);
+  return c.json(await overview(ctx));
+});
+
+app.get('/api/apps/:id/stats/breakdown', async (c) => {
+  const row = await getAppById(c.env.DB, c.req.param('id'));
+  if (!row) return c.json({ error: 'not found' }, 404);
+  const dim = c.req.query('dim') ?? '';
+  if (!isDim(dim)) return c.json({ error: 'unknown dim' }, 400);
+  const ctx = statsContext(c, row);
+  if ('error' in ctx) return c.json({ error: ctx.error }, 400);
+  return c.json(await breakdown(ctx, dim));
+});
 
 // ---------- fallbacks
 
