@@ -1,6 +1,7 @@
 {
   "name": "appdash",
   "private": true,
+  "engines": { "node": ">=22.12" },
   "packageManager": "pnpm@12.16.1",
   "scripts": {
     "test": "pnpm -r test",
