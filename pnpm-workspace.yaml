@@ -5,3 +5,5 @@ packages:
 allowBuilds:
   esbuild: true
   workerd: true
+  # Pulled in by jest (jest-haste-map) for @appdash/expo; ships prebuilt binaries, so its install script is not needed.
+  '@parcel/watcher': false
