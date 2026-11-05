@@ -19,7 +19,7 @@ appdash is an open-source, self-hosted, revenue-first analytics product for Expo
 1. Click **Deploy to Cloudflare** above and connect GitHub. Cloudflare forks the repo into your account.
 2. Choose names for the Worker, the repository and the D1 database (the defaults are fine).
 3. Enter `ADMIN_PASSWORD` (at least 12 characters). You use it to log in.
-4. Wait for the build. D1 is created and migrations are applied during the build.
+4. Wait for the build. Cloudflare pre-fills the build and deploy commands from `package.json`. Keep the deploy command `pnpm run deploy` if Cloudflare shows it: it applies the D1 migrations and then deploys. D1 itself is provisioned from `wrangler.jsonc`.
 5. Open the `https://appdash.<your-subdomain>.workers.dev` URL, log in and follow the setup wizard. It takes you to a verified first event and a verified RevenueCat webhook.
 
 Screenshots of the Cloudflare screens are not included yet.
@@ -50,8 +50,13 @@ The Deploy button provisions D1 automatically and offers no way to choose a loca
 
 If you must keep data in the EU/UK, use one of these instead:
 
-- **Manual path** above with `--jurisdiction eu` (restricts the database to run and store data within the EU; when a jurisdiction is set, `--location` is ignored). `--location weur` is only a hint, not a guarantee.
-- **Deploy button, database created first**: create the D1 in the EU with `npx wrangler d1 create appdash --jurisdiction eu`, then in your fork set its id in `wrangler.jsonc` before deploying.
+- **Manual path** above with `--jurisdiction eu` (use it for EU data residency). `--location weur` is only a location hint, not a guarantee.
+- **Your own fork with Workers Builds** (instead of the one-click button):
+  1. Fork the repo on GitHub.
+  2. Create the D1 with `npx wrangler d1 create appdash --jurisdiction eu`.
+  3. Edit `database_id` in the fork's `wrangler.jsonc` and commit.
+  4. In Cloudflare go to Workers & Pages → Create → Import a repository and pick the fork.
+  5. Set the deploy command to `pnpm run deploy` and add the `ADMIN_PASSWORD` variable/secret.
 
 Cloudflare's [Data Processing Addendum](https://www.cloudflare.com/cloudflare-customer-dpa/) applies to your account. Review it and the transfer terms with your own advisers.
 
@@ -103,11 +108,11 @@ No setup. On iOS the SDK reads an AdServices token on first launch and the serve
 This section is a starting point, not legal advice.
 
 - **You are the controller.** The person who deploys an instance decides why and how the data is used. appdash is only the tool.
-- **Consent (UK GDPR / PECR).** Storing or reading data on the device may need consent. Use `Appdash.init({ requireConsent: true })`: nothing is stored or sent until `Appdash.optIn()`, and `Appdash.optOut()` stops collection and clears the local queue.
+- **Consent (UK GDPR / PECR).** Storing or reading data on the device may need consent. Use `Appdash.init({ requireConsent: true })`: nothing is stored or sent until `Appdash.optIn()`, and `Appdash.optOut()` stops collection and clears the queue on the device. It does not delete data already sent to the server; use Settings → Delete user data for that.
 - **What is collected.** A random install id (not IDFA/GAID); device model, OS version, app version, language and timezone; country, region and city derived from the request (the IP is not stored); sessions, screens and custom events; campaign and source details from tracked links, the Play install referrer and Apple Search Ads; RevenueCat purchase events linked to the install id; and, if you call `identify`, a user id and optionally email and name. Private URL parameters (`email`, `token`, `code`, ...) are stripped before anything is stored. The setup wizard (step 6) offers a privacy-policy paragraph that lists this; it is generated in [apps/dashboard/src/lib/setup.ts](apps/dashboard/src/lib/setup.ts).
 - **Personal data.** `app_user_id` (RevenueCat) and `identify` email/name are personal data. Send an opaque `userId` rather than an email or name. The erase endpoint takes the id in the query string (`DELETE /api/apps/:id/users`), so avoid emails as ids: they would land in request logs.
-- **Retention.** Per-app `retention_months`, default 25. An hourly job removes older events, sessions and link clicks, and installs with no session in that period. RevenueCat delivery logs are kept 30 days.
-- **Erasure.** Settings → delete user data, by `user_id` or install id. It deletes the install, its sessions and events, detaches link clicks, and clears the install and user ids from payments and delivery logs. Kept, anonymised: payment amounts, timestamps and product fields (for accounting) and link-click counts.
+- **Retention.** Per-app `retention_months`, default 25. An hourly job (each app at most once per 23 h) deletes events, sessions and link clicks older than the cutoff. It then deletes installs whose last activity is older than the cutoff and that have no session left. For those installs, link clicks are detached, and payments and RevenueCat delivery logs lose their install and user ids (payments get `matched_by = erased`) but the rows stay. Payments are never deleted by retention. RevenueCat delivery logs are deleted after 30 days.
+- **Erasure.** Settings → Delete user data, by `user_id` or install id. It deletes the matching installs with their sessions and events, detaches their link clicks (the click rows stay), and clears install id, user id and session id on their payments and delivery logs. Payment rows (amount, timestamp, product, store) are kept for accounting without identifying fields. With a `user_id` it also clears that RevenueCat `app_user_id` on payments and delivery logs that never matched an install.
 - **Location and processor.** See [Data location](#data-location) and Cloudflare's DPA. GitHub holds your fork; npm serves the SDK at build time; RevenueCat sends webhooks in.
 - Using appdash inside an amicable product: sending emails or names through `identify` needs a DPIA first. Send only an opaque `userId`.
 
@@ -152,9 +157,17 @@ ADMIN_PASSWORD=... pnpm run smoke http://localhost:8787
 
 The example app in [examples/expo-demo](examples/expo-demo) and the checks in [docs/manual-testing.md](docs/manual-testing.md) exercise the SDK on real builds. `pod install` may need `LANG=en_US.UTF-8` in your environment. Android verification is pending: there is no JDK in CI yet.
 
+## Before first release
+
+Maintainer checklist:
+
+- [ ] Replace `OWNER` in the Deploy button URL and comment in this README, in `packages/sdk-expo/package.json` (`repository`, `bugs`, `homepage`) and in `packages/sdk-expo/README.md`.
+- [ ] Add the `NPM_TOKEN` repository secret (npm automation token).
+- [ ] Add screenshots of the Cloudflare deploy screens to the "Deploy in 5 minutes" section.
+
 ## Releasing the SDK
 
-Only `@appdash/expo` is published (`@appdash/shared` is bundled into it and private). Add an npm automation token as the repository secret `NPM_TOKEN`, then push a tag such as `sdk-v0.1.0`. The workflow in `.github/workflows/release-sdk.yml` builds and publishes with provenance.
+Only `@appdash/expo` is published (`@appdash/shared` is bundled into it and private). Add an npm automation token as the repository secret `NPM_TOKEN`, then push a tag such as `sdk-v0.1.0`. The workflow in `.github/workflows/release-sdk.yml` checks that the tag matches the SDK version in `packages/sdk-expo/package.json`, then builds and publishes with provenance.
 
 ## License
 

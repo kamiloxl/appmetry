@@ -17,6 +17,13 @@ jobs:
           node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
+      - name: Check tag matches SDK version
+        run: |
+          VERSION=$(node -p "require('./packages/sdk-expo/package.json').version")
+          if [ "$GITHUB_REF_NAME" != "sdk-v$VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match packages/sdk-expo version $VERSION (expected sdk-v$VERSION)" >&2
+            exit 1
+          fi
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
