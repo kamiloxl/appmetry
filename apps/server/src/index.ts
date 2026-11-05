@@ -135,8 +135,17 @@ app.onError((err, c) => {
 });
 
 async function scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-  await purgeLoginFailures(env.DB, controller.scheduledTime);
-  await runDaily(env, controller.scheduledTime);
+  // Independent jobs: one failing must not stop the other.
+  try {
+    await purgeLoginFailures(env.DB, controller.scheduledTime);
+  } catch (err) {
+    console.error('purgeLoginFailures failed', err instanceof Error ? err.message : 'unknown error');
+  }
+  try {
+    await runDaily(env, controller.scheduledTime);
+  } catch (err) {
+    console.error('runDaily failed', err instanceof Error ? err.message : 'unknown error');
+  }
 }
 
 export default { fetch: app.fetch, scheduled } satisfies ExportedHandler<Env>;

@@ -21,6 +21,9 @@ export function eraseStatements(db: D1Database, appId: string, ids: string[]): D
       )
       .bind(appId, json),
     db.prepare(`UPDATE rc_events SET install_id = NULL, app_user_id = NULL WHERE app_id = ? AND install_id ${inIds}`).bind(appId, json),
+    // RevenueCat app_user_id can equal the install id (anonymous matching), also on rows that never matched.
+    db.prepare(`UPDATE payments SET app_user_id = NULL WHERE app_id = ? AND app_user_id ${inIds}`).bind(appId, json),
+    db.prepare(`UPDATE rc_events SET app_user_id = NULL WHERE app_id = ? AND app_user_id ${inIds}`).bind(appId, json),
     db.prepare(`DELETE FROM events WHERE app_id = ? AND install_id ${inIds}`).bind(appId, json),
     db.prepare(`DELETE FROM sessions WHERE app_id = ? AND install_id ${inIds}`).bind(appId, json),
     db.prepare(`DELETE FROM installs WHERE app_id = ? AND id ${inIds}`).bind(appId, json),

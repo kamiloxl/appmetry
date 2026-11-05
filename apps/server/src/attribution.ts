@@ -84,6 +84,8 @@ async function applyReferrer(db: D1Database, appId: string, installId: string, r
 export interface AsaDeps {
   fetchFn?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
+  /** Apple 404 ("not ready") attempts; default 3 with a wait between. The cron uses 1. */
+  maxAttempts?: number;
 }
 
 /**
@@ -93,7 +95,7 @@ export interface AsaDeps {
 export async function resolveAsaToken(
   db: D1Database, appId: string, installId: string, token: string, pendingUntil: number, deps: AsaDeps = {},
 ): Promise<void> {
-  const out = await exchangeAdServicesToken(token, deps.fetchFn, deps.sleep);
+  const out = await exchangeAdServicesToken(token, deps.fetchFn, deps.sleep, deps.maxAttempts);
   if (out.status === 'retry') {
     await db
       .prepare('UPDATE installs SET asa_pending_token = ?, asa_pending_until = ? WHERE app_id = ? AND id = ?')

@@ -1,4 +1,6 @@
+import { createExecutionContext, createScheduledController, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
+import worker from '../src/index';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../src/env';
 import { runDaily } from '../src/cron';
@@ -7,6 +9,7 @@ import { call, createApp, login } from './helpers';
 import { insertEvent, insertInstall, insertPayment, insertSession } from './fixtures/seed';
 
 const DAY = 86_400_000;
+const HOUR = 3_600_000;
 const MONTH = 30.44 * DAY;
 const db = env.DB;
 let cookie: string;
@@ -18,7 +21,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   // runDaily walks every app and has a query budget, so each test starts from an empty instance.
   await db.batch(
-    ['installs', 'sessions', 'events', 'links', 'link_clicks', 'payments', 'rc_events', 'apps'].map((t) => db.prepare(`DELETE FROM ${t}`)),
+    [...['installs', 'sessions', 'events', 'links', 'link_clicks', 'payments', 'rc_events', 'apps'].map((t) => db.prepare(`DELETE FROM ${t}`)), db.prepare("DELETE FROM meta WHERE key LIKE 'cron_last_run:%'")],
   );
 });
 
@@ -91,6 +94,18 @@ describe('erasure', () => {
     expect(await eraseUser(db, a.id, { installId: 'install-same-1' })).toBe(1);
     expect(await n('SELECT COUNT(*) AS n FROM installs WHERE app_id = ?', a.id)).toBe(0);
     expect(await n('SELECT COUNT(*) AS n FROM installs WHERE app_id = ?', b.id)).toBe(1);
+  });
+
+  it('erasure also nulls app_user_id equal to an erased install id on unmatched rows', async () => {
+    const app = await createApp(cookie);
+    const now = Date.now();
+    await addInstall(app.id, 'install-anon-001', now);
+    await insertPayment(db, app.id, { id: `${app.id}_a1`, ts: now, amount: 100 }).run();
+    await setPaymentUser(`${app.id}_a1`, 'install-anon-001');
+    await addRc(app.id, `${app.id}_ar1`, now, null, 'install-anon-001');
+    await eraseUser(db, app.id, { installId: 'install-anon-001' });
+    expect(await db.prepare('SELECT app_user_id FROM payments WHERE id = ?').bind(`${app.id}_a1`).first('app_user_id')).toBeNull();
+    expect(await db.prepare('SELECT app_user_id FROM rc_events WHERE id = ?').bind(`${app.id}_ar1`).first('app_user_id')).toBeNull();
   });
 
   it('erase requires exactly one of user_id/install_id, and a known app', async () => {
@@ -220,19 +235,82 @@ describe('runDaily', () => {
     expect(err).toHaveBeenCalledWith('daily run failed for app', a.id, 'boom');
   });
 
-  it('stops when the query budget is reached and logs it', async () => {
+  it('stops at the query budget and serves the remaining apps on the next hourly run', async () => {
     const now = Date.now();
-    const apps = [];
-    for (let i = 0; i < 6; i++) {
-      const app = await createApp(cookie);
-      await addRc(app.id, `${app.id}_old`, now - 31 * DAY, null, null);
-      apps.push(app);
-    }
+    for (let i = 0; i < 6; i++) await createApp(cookie);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await runDaily(env, now);
+    const served = () => n("SELECT COUNT(*) AS n FROM meta WHERE key LIKE 'cron_last_run:%'");
+    await runDaily(env, now, undefined, 35);
     expect(warn).toHaveBeenCalledWith('daily run budget reached');
-    const left = await n('SELECT COUNT(*) AS n FROM rc_events');
-    expect(left).toBeGreaterThan(0);
-    expect(left).toBeLessThan(6);
+    const first = await served();
+    expect(first).toBeGreaterThan(0);
+    expect(first).toBeLessThan(6);
+    await runDaily(env, now + HOUR, undefined, 35);
+    expect(await served()).toBe(6);
+  });
+
+  it('skips an app processed less than 23 h ago', async () => {
+    const now = Date.now();
+    const app = await createApp(cookie);
+    await addRc(app.id, `${app.id}_old`, now - 31 * DAY, null, null);
+    await runDaily(env, now);
+    await addRc(app.id, `${app.id}_old2`, now - 31 * DAY, null, null);
+    await runDaily(env, now + 22 * HOUR);
+    expect(await n('SELECT COUNT(*) AS n FROM rc_events WHERE app_id = ?', app.id)).toBe(1);
+    await runDaily(env, now + 23 * HOUR);
+    expect(await n('SELECT COUNT(*) AS n FROM rc_events WHERE app_id = ?', app.id)).toBe(0);
+  });
+
+  it('processes the least recently processed app first, missing keys before any', async () => {
+    const now = Date.now();
+    const a = await createApp(cookie);
+    const b = await createApp(cookie);
+    const c = await createApp(cookie);
+    const setLast = (id: string, ts: number) => db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)').bind(`cron_last_run:${id}`, String(ts)).run();
+    await setLast(a.id, now - 30 * HOUR);
+    await setLast(b.id, now - 40 * HOUR);
+    // c has no key. Budget of 13 fits the 2 setup queries plus exactly one idle app (11).
+    for (const x of [a, b, c]) await addRc(x.id, `${x.id}_old`, now - 31 * DAY, null, null);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await runDaily(env, now, undefined, 13);
+    expect(await n('SELECT COUNT(*) AS n FROM rc_events WHERE app_id = ?', c.id)).toBe(0);
+    expect(await n('SELECT COUNT(*) AS n FROM rc_events WHERE app_id = ?', b.id)).toBe(1);
+    await runDaily(env, now + HOUR, undefined, 13);
+    expect(await n('SELECT COUNT(*) AS n FROM rc_events WHERE app_id = ?', b.id)).toBe(0);
+    expect(await n('SELECT COUNT(*) AS n FROM rc_events WHERE app_id = ?', a.id)).toBe(1);
+  });
+
+  it('a 404 from Apple in cron keeps the token after exactly one fetch and never sleeps', async () => {
+    const now = Date.now();
+    const app = await createApp(cookie);
+    await addInstall(app.id, 'install-404-asa1', now);
+    await db.prepare('UPDATE installs SET asa_pending_token = ?, asa_pending_until = ? WHERE app_id = ?').bind('tok404', now + DAY / 2, app.id).run();
+    let fetches = 0;
+    const timers = vi.spyOn(globalThis, 'setTimeout');
+    await runDaily(env, now, (async () => { fetches++; return new Response('', { status: 404 }); }) as unknown as typeof fetch);
+    expect(fetches).toBe(1);
+    expect(timers.mock.calls.filter(([, ms]) => ms === 5000)).toHaveLength(0);
+    expect(await db.prepare('SELECT asa_pending_token AS t FROM installs WHERE app_id = ?').bind(app.id).first('t')).toBe('tok404');
+  });
+
+  it('the scheduled handler still runs runDaily when the login-failure purge throws', async () => {
+    const now = Date.now();
+    const app = await createApp(cookie);
+    await addRc(app.id, `${app.id}_old`, now - 31 * DAY, null, null);
+    const wrapped = {
+      ...env,
+      DB: {
+        prepare: (sql: string) => {
+          if (sql.includes('login_failures')) throw new Error('purge boom');
+          return db.prepare(sql);
+        },
+        batch: (s: D1PreparedStatement[]) => db.batch(s),
+      },
+    } as unknown as Env;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const ctx = createExecutionContext();
+    await worker.scheduled(createScheduledController({ scheduledTime: now, cron: '0 * * * *' }), wrapped, ctx);
+    await waitOnExecutionContext(ctx);
+    expect(await n('SELECT COUNT(*) AS n FROM rc_events WHERE app_id = ?', app.id)).toBe(0);
   });
 });

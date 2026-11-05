@@ -17,8 +17,9 @@ export async function exchangeAdServicesToken(
   token: string,
   fetchFn: typeof fetch = (input, init) => fetch(input, init),
   sleep: (ms: number) => Promise<void> = defaultSleep,
+  maxAttempts: number = MAX_ATTEMPTS,
 ): Promise<AdServicesOutcome> {
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let res: Response;
     try {
       res = await fetchFn(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: token, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
@@ -34,7 +35,7 @@ export async function exchangeAdServicesToken(
     }
     if (res.status === 400) return { status: 'invalid' };
     if (res.status !== 404) return { status: 'retry' };
-    if (attempt < MAX_ATTEMPTS) await sleep(NOT_READY_WAIT_MS);
+    if (attempt < maxAttempts) await sleep(NOT_READY_WAIT_MS);
   }
   return { status: 'retry' };
 }
