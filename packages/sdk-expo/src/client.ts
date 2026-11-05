@@ -2,12 +2,14 @@ import { extractTouch, LIMITS, stripPrivateParams, type BatchContext, type Event
 import { randomUUID } from 'expo-crypto';
 import { AppState } from 'react-native';
 
+import { AttributionCache, ATTRIBUTION_KEY } from './attribution';
 import { buildContext, mobilePlatform } from './context';
 import { startDeepLinks, type LinkingLike } from './deeplink';
 import { Flusher } from './flusher';
 import { log, setDebug } from './log';
 import { collectInstallProps } from './native';
 import { Queue } from './queue';
+import { applyAttribution, applyInstallId, type RevenueCatLike } from './revenuecat';
 import { SessionTracker } from './session';
 import { createStore, type KV } from './storage';
 import { Transport } from './transport';
@@ -33,6 +35,11 @@ export interface AppdashApi {
   optOut(): void;
   installId(): Promise<string | null>;
   flush(): Promise<void>;
+  /**
+   * Writes the appdash install id into the RevenueCat customer and sets its attribution attributes from the
+   * install's resolved source. Pass the `Purchases` default export. Never throws.
+   */
+  syncRevenueCat(purchases: RevenueCatLike, o?: { waitMs?: number }): Promise<void>;
 }
 
 /** Internal surface: not part of the documented public API. */
@@ -43,6 +50,7 @@ export interface AppdashInternal extends AppdashApi {
 const KEY_IID = 'appdash:iid';
 const KEY_CONSENT = 'appdash:consent';
 const KEY_INSTALLED = 'appdash:installed';
+const DEFAULT_ATTRIBUTION_WAIT_MS = 3000;
 const DEFAULT_SESSION_TIMEOUT_MS = 5 * 60_000;
 const MAX_NAME = 255;
 const DEEP_LINK_DEDUP_MS = 2000;
@@ -101,6 +109,10 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashInternal {
   let subscription: { remove(): void } | null = null;
   let stopDeepLinks: (() => void) | null = null;
   let lastLink: { url: string; ts: number } | null = null;
+  let attribution: AttributionCache | null = null;
+  /** The `purchases` object last passed to syncRevenueCat, and whether it still waits for late attribution. */
+  let lastPurchases: RevenueCatLike | null = null;
+  let awaitingAttribution = false;
 
   const appState = () => deps.appState ?? (AppState as unknown as NonNullable<AppdashDeps['appState']>);
 
@@ -249,6 +261,13 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashInternal {
             return buildContext(iid, platform, SDK_VERSION);
           },
         });
+        attribution = new AttributionCache(store, { host: o.host, appKey: o.appKey, fetchFn: deps.fetchFn });
+        attribution.onResolved((a) => {
+          const p = lastPurchases;
+          if (!enabled || !p || !awaitingAttribution) return;
+          awaitingAttribution = false;
+          void applyAttribution(p, a);
+        });
         chain = Promise.resolve();
         void run(setup);
       } catch (err) {
@@ -350,6 +369,9 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashInternal {
         stopDeepLinks = null;
         lastLink = null;
         iid = null;
+        attribution?.stop();
+        lastPurchases = null;
+        awaitingAttribution = false;
         // Privacy reset: the next opt-in is a fresh install with a fresh session.
         tracker = new SessionTracker(opts.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS, newId);
         // Issued back to back; the queue is cleared last and its writes are blocked while disabled.
@@ -357,6 +379,7 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashInternal {
           store.set(KEY_CONSENT, 'denied'),
           store.remove(KEY_IID),
           store.remove(KEY_INSTALLED),
+          store.remove(ATTRIBUTION_KEY),
           queue.clear(),
         ]).catch((err: unknown) => log('optOut cleanup failed', err));
       } catch (err) {
@@ -367,6 +390,28 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashInternal {
     async installId() {
       if (disabled) return null;
       return (await run(() => (enabled && activated ? iid : null))) ?? null;
+    },
+
+    async syncRevenueCat(purchases, o) {
+      try {
+        if (disabled || !purchases) return;
+        // Look up the iid inside the chain, but wait on the network outside it.
+        const ctx = await run((gen) => (enabled && activated && iid ? { iid, gen } : null));
+        if (!ctx || ctx.gen !== generation || !enabled) return;
+        lastPurchases = purchases;
+        await applyInstallId(purchases, ctx.iid);
+        const waitMs = typeof o?.waitMs === 'number' && o.waitMs >= 0 ? o.waitMs : DEFAULT_ATTRIBUTION_WAIT_MS;
+        const a = await attribution?.get(ctx.iid, waitMs);
+        if (ctx.gen !== generation || !enabled || lastPurchases !== purchases) return;
+        if (a) {
+          awaitingAttribution = false;
+          await applyAttribution(purchases, a);
+        } else {
+          awaitingAttribution = true; // apply once when it resolves later
+        }
+      } catch (err) {
+        log('syncRevenueCat failed', err);
+      }
     },
 
     async flush() {

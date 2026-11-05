@@ -7,3 +7,6 @@ export { SessionTracker } from './session';
 export { setDebug } from './log';
 export type { Batch, BatchContext, SdkEvent } from '@appdash/shared';
 export { AppdashProvider } from './provider';
+export { AttributionCache } from './attribution';
+export { rcAttributes, type RevenueCatLike } from './revenuecat';
+export type { AttributionResponse } from '@appdash/shared';
