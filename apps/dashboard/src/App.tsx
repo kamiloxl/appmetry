@@ -5,6 +5,7 @@ import { api } from './lib/api';
 import type { AppInfo, Me } from './lib/types';
 import { Apps } from './pages/Apps';
 import { Customers } from './pages/Customers';
+import { Links } from './pages/Links';
 import { Login } from './pages/Login';
 import { Overview } from './pages/Overview';
 
@@ -120,7 +121,7 @@ export function App() {
         <Route path="/apps/:id" element={<AppLayout />}>
           <Route index element={<Overview />} />
           <Route path="customers" element={<Customers />} />
-          <Route path="links" element={<Back title="Links coming soon" />} />
+          <Route path="links" element={<Links />} />
           <Route path="settings" element={<Back title="Settings coming soon" />} />
           <Route path="setup" element={<Back title="Setup wizard coming soon" />} />
         </Route>

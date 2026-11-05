@@ -85,3 +85,29 @@ export interface RematchResult {
   matched: number;
   remaining: number;
 }
+
+/** GET /api/apps/:id/links item (the raw links row). Optional fields are null when left blank. */
+export interface TrackedLink {
+  id: string;
+  app_id: string;
+  slug: string;
+  name: string | null;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  utm_content: string | null;
+  ref: string | null;
+  created_at: number;
+}
+
+/** GET /api/apps/:id/stats/links row. Links with no clicks are included. `revenue` is USD cents. */
+export interface LinkStat {
+  linkId: string;
+  name: string | null;
+  slug: string;
+  clicks: number;
+  androidClicks: number;
+  iosClicks: number;
+  installs: number;
+  revenue: number;
+}
