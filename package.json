@@ -9,6 +9,7 @@
     "build": "pnpm --filter @appdash/dashboard --if-present build",
     "predev": "node scripts/ensure-dist.mjs && wrangler d1 migrations apply DB --local",
     "dev": "wrangler dev --port 8787",
+    "seed": "node apps/server/scripts/seed-demo.mjs && wrangler d1 execute DB --local --file .wrangler/seed.sql",
     "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy"
   },
   "devDependencies": {

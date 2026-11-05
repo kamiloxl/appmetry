@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    "declaration": false
+  },
+  // Browser code: DOM lib from the base config. vite/tailwind/postcss configs run in Node and are not checked here.
+  "include": ["src", "test", "vite.config.ts"]
+}
