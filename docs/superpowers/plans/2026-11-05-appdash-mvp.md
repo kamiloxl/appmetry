@@ -27,7 +27,14 @@ web/SaaS-only parts, and rename `site` to `app`.
 - Private URL params stripped by the SDK and the server (case-insensitive): `email, e-mail, name, phone, password, pass, token, access_token, id_token, auth, code, secret, key, api_key, license_key, license`.
 - Channels: `Direct | Organic | Organic Search | Organic Social | AI | Referral | Email | Paid | Paid Search` (Datadash's set, plus `Organic` for store installs and `Paid Search` for Apple Search Ads).
 - Money: integer USD cents from RevenueCat `price`; refunds negative. `SANDBOX` is stored but excluded unless the app's `show_sandbox = 1`.
-- RevenueCat attribute key: **`appdash_install_id`** (RevenueCat reserves the `$` prefix; this corrects spec §3/§5).
+- RevenueCat attribute key: **`appdash_install_id`** (RevenueCat reserves the `$` prefix for its own attributes).
+- RevenueCat attribution attributes set by `syncRevenueCat`:
+  - `$mediaSource` = source
+  - `$campaign` = utm_campaign ?? asa_campaign_id
+  - `$adGroup` = asa_adgroup_id
+  - `$ad` = utm_content
+  - `$keyword` = utm_term ?? asa_keyword_id
+- RevenueCat lifecycle event names: the `rc_*` table in spec §5. Health warning below 50% of 24 h production events carrying `appdash_install_id`.
 - Retention default 25 months. Login lockout: 10 failures per IP in 15 min. Cron `0 3 * * *`.
 - Every dashboard API route requires the session cookie. Every query is scoped by `app_id`. Prepared statements only.
 - Filters in stats are **install-level** (source, channel, campaign, asa_campaign_id, platform, country, app_version, os_version, device_model). Sessions, active users and revenue are counted for installs that pass the filter.
@@ -297,11 +304,11 @@ export type OnInstall = (installId: string, ev: SdkEvent) => Promise<void>;
 - [ ] **Step 4:** Run the tests. Expected: PASS.
 - [ ] **Step 5:** Commit: `feat(server): batch ingestion with dedup and sessions`.
 
-### Task 7: Install Referrer and Apple Search Ads attribution
+### Task 7: Install Referrer and Apple Search Ads attribution, attribution lookup
 
 **Files:**
 - Create: `apps/server/src/adservices.ts`, `apps/server/src/attribution.ts`
-- Modify: `apps/server/src/ingest.ts` (wire `onInstall`)
+- Modify: `apps/server/src/ingest.ts` (wire `onInstall`), `apps/server/src/index.ts` (`GET /api/v1/attribution`, same CORS and limiter as the batch route), `packages/shared/src/attribution.ts` (add `AttributionResponse`)
 - Test: `apps/server/test/attribution.test.ts`
 
 **Interfaces:**
@@ -313,7 +320,12 @@ export async function exchangeAdServicesToken(token: string, fetchFn?: typeof fe
   sleep?: (ms: number) => Promise<void>): Promise<AdServicesOutcome>;
 export async function applyAttribution(db: D1Database, appId: string, installId: string, candidate: InstallAttribution | null): Promise<void>;
 export function makeOnInstall(db: D1Database, app: AppRow, waitUntil: (p: Promise<unknown>) => void, now: number): OnInstall;
+// GET /api/v1/attribution?iid=<id>, header X-App-Key → 200 AttributionResponse | 401 | 404 (unknown install)
+export interface AttributionResponse { resolved: boolean /* false while asa_pending_token is set */; method: AttributionMethod;
+  source: string; channel: Channel; utm_campaign: string|null; utm_content: string|null; utm_term: string|null;
+  asa_campaign_id: number|null; asa_adgroup_id: number|null; asa_keyword_id: number|null }
 ```
+`AttributionResponse` lives in `packages/shared/src/attribution.ts` so the SDK (Task 18) imports the same type.
 - Apple contract (verified 2026-11-05):
   - `POST https://api-adservices.apple.com/api/v1/` with `Content-Type: text/plain` and the raw token as body.
   - 200 returns JSON `{attribution, orgId, campaignId, adGroupId, keywordId?, adId?, claimType, conversionType, …}`.
@@ -328,6 +340,10 @@ export function makeOnInstall(db: D1Database, app: AppRow, waitUntil: (p: Promis
   - `200 attribution true sets search_ads`: fake fetch through `makeOnInstall`.
   - `retry outcome stores asa_pending_token and asa_pending_until = install ts + 24h`.
   - `search_ads does not override install_referrer`.
+  - `attribution endpoint returns resolved install_referrer attribution`.
+  - `attribution endpoint returns resolved false while asa token pending`.
+  - `attribution endpoint 404 for unknown iid and for an iid of another app`.
+  - `attribution endpoint 401 for unknown key`.
 - [ ] **Step 2:** Run the tests. Expected: FAIL.
 - [ ] **Step 3:** Implement.
   - `makeOnInstall` reads the Android referrer synchronously. For the iOS token it calls `waitUntil(exchange…)`.
@@ -366,7 +382,7 @@ export function makeOnInstall(db: D1Database, app: AppRow, waitUntil: (p: Promis
 - [ ] **Step 4:** Run the tests. Expected: PASS.
 - [ ] **Step 5:** Commit: `feat(server): tracked links with Play install referrer`.
 
-### Task 9: RevenueCat webhook, matching, credit
+### Task 9: RevenueCat webhook, matching, credit, lifecycle events, health
 
 **Files:**
 - Create: `apps/server/src/revenuecat.ts`, `apps/server/src/credit.ts`
@@ -381,7 +397,10 @@ export async function handleRevenueCat(c: Context<AppEnv>): Promise<Response>;  
 export async function matchInstall(db, appId: string, ev: RcEvent): Promise<{ installId: string|null; matchedBy: 'attribute'|'user_id'|'install_id'|'none' }>;
 export async function creditedSessionId(db, appId: string, installId: string, ts: number): Promise<string|null>;
 export async function rematch(db, appId: string, sinceTs: number): Promise<number /*newly matched*/>;
-// route (auth): POST /api/apps/:id/payments/rematch → { matched: number }
+export function lifecycleEventName(ev: RcEvent): string | null;   // mapping table in spec §5 "Subscription lifecycle events"
+export async function rcHealth(db, appId: string, now: number): Promise<RcHealth>;
+export interface RcHealth { lastEventAt: number|null; events24h: number; withInstallId24h: number; matched24h: number; warning: boolean }
+// routes (auth): POST /api/apps/:id/payments/rematch → { matched: number };  GET /api/apps/:id/revenuecat/health → RcHealth
 ```
 - RevenueCat contract (verified 2026-11-05):
   - Body `{ api_version, event }`.
@@ -397,9 +416,17 @@ export async function rematch(db, appId: string, sinceTs: number): Promise<numbe
     - `INITIAL_PURCHASE price 9.99 stores 999 cents payment`.
     - `RENEWAL sets renewal = 1`.
     - `CANCELLATION with cancel_reason CUSTOMER_SUPPORT and price -9.99 stores refund -999`.
-    - `CANCELLATION UNSUBSCRIBE is ignored`.
-    - `INITIAL_PURCHASE TRIAL price 0 stores events row type event name trial_started, no payment`.
+    - `CANCELLATION UNSUBSCRIBE stores no payment but an rc_subscription_cancelled event with props.reason`.
+    - `INITIAL_PURCHASE TRIAL price 0 stores rc_trial_started event, no payment`.
     - `price null stores amount 0 and logs nothing personal`.
+  - Lifecycle events:
+    - `lifecycleEventName covers every row of the spec mapping table`: one assertion per row, plus `TRANSFER` gives `null`.
+    - `matched event is stored with id rc_<event id>, session_id null, props product_id/store/price_usd`.
+    - `unmatched event writes rc_events only`.
+    - `every delivery is logged once in rc_events, including ignored types`.
+  - Health:
+    - `rcHealth counts last 24h production events, share with appdash_install_id and share matched`.
+    - `rcHealth warning is true below 50% with at least one event, false with zero events`.
   - Matching:
     - `matches by subscriber_attributes.appdash_install_id`, with `matched_by` `attribute`.
     - `matches by aliases equal to installs.user_id`.
@@ -412,8 +439,11 @@ export async function rematch(db, appId: string, sinceTs: number): Promise<numbe
     - `rematch links payment after late install`: webhook first, then batch with identify, then `POST …/payments/rematch` returns `{matched:1}`.
 - [ ] **Step 2:** Run the tests. Expected: FAIL.
 - [ ] **Step 3:** Implement.
-  - Counted types: `INITIAL_PURCHASE`, `RENEWAL`, `NON_RENEWING_PURCHASE`, and `CANCELLATION` with `cancel_reason === 'CUSTOMER_SUPPORT'`. Everything else returns 200 and is ignored.
+  - Order per delivery: auth, then `INSERT OR IGNORE` into `rc_events` (when no row changed, return 200: a duplicate), then match, then payment row, then lifecycle event.
+  - Payment types: `INITIAL_PURCHASE`, `RENEWAL`, `NON_RENEWING_PURCHASE`, and `CANCELLATION` with `cancel_reason === 'CUSTOMER_SUPPORT'`. Other types produce only the lifecycle event, or nothing.
+  - `has_install_attr = 1` when `subscriber_attributes.appdash_install_id.value` is a non-empty string.
   - `ts = purchased_at_ms ?? event_timestamp_ms`. `amount = Math.round(price * 100)`.
+  - `rematch` also backfills lifecycle events for newly matched installs.
   - Return 500 only when the DB write throws.
 - [ ] **Step 4:** Run the tests. Expected: PASS.
 - [ ] **Step 5:** Commit: `feat(server): RevenueCat webhook with install matching and credit`.
@@ -496,6 +526,7 @@ export async function rematch(db, appId: string, sinceTs: number): Promise<numbe
   - `runDaily deletes installs with no session in retention window`.
   - `runDaily retries pending ASA tokens younger than 24h and clears expired ones`.
   - `runDaily rematches unmatched payments from the last 7 days`.
+  - `runDaily deletes rc_events older than 30 days`.
 - [ ] **Step 2:** Run the tests. Expected: FAIL.
 - [ ] **Step 3:** Implement. Batch deletes in chunks of 500 ids so the free-plan CPU limit holds.
 - [ ] **Step 4:** Run the tests. Expected: PASS.
@@ -663,7 +694,49 @@ The module's own Gradle and podspec files carry the dependencies, so the spec's 
 - [ ] **Step 4:** Run the tests. Expected: PASS. Then `cd packages/sdk-expo && npx expo-module build` (or the template's `build` script). Expected: no TS errors.
 - [ ] **Step 5:** Commit: `feat(sdk): native AdServices and Install Referrer module`.
 
-### Task 18: Example app and manual checklist
+### Task 18: RevenueCat sync
+
+**Files:**
+- Create: `packages/sdk-expo/src/attribution.ts`, `packages/sdk-expo/src/revenuecat.ts`
+- Modify: `packages/sdk-expo/src/client.ts` (expose `syncRevenueCat`), `packages/sdk-expo/src/index.ts`
+- Test: `packages/sdk-expo/src/__tests__/{attribution.test.ts,revenuecat.test.ts}`
+
+**Interfaces:**
+- Consumes: `AttributionResponse` (shared, Task 7); `Transport` options `host`/`appKey` (Task 14); consent state and `installId()` (Task 15).
+- Produces:
+```ts
+export class AttributionCache { constructor(kv: KV, o: { host: string; appKey: string; fetchFn?: typeof fetch });
+  get(iid: string, waitMs: number): Promise<AttributionResponse | null>;   // cache key 'appdash:attribution', stored once resolved
+  onResolved(cb: (a: AttributionResponse) => void): () => void }         // fires when a pending lookup resolves later
+export interface RevenueCatLike { setAttributes(a: Record<string, string | null>): unknown;
+  setMediaSource?(v: string | null): unknown; setCampaign?(v: string | null): unknown; setAdGroup?(v: string | null): unknown;
+  setAd?(v: string | null): unknown; setKeyword?(v: string | null): unknown; syncAttributesAndOfferingsIfNeeded?(): Promise<unknown> }
+export function rcAttributes(a: AttributionResponse): { mediaSource: string; campaign: string|null; adGroup: string|null; ad: string|null; keyword: string|null };
+// Appdash.syncRevenueCat(purchases: RevenueCatLike, o?: { waitMs?: number /*3000*/ }): Promise<void>
+```
+
+- [ ] **Step 1: Failing tests.**
+  - `attribution.test.ts`:
+    - `returns cached resolved attribution without fetching`.
+    - `fetches GET <host>/api/v1/attribution?iid= with X-App-Key and caches when resolved`.
+    - `polls every 1 s until resolved or waitMs, then returns null`, with fake timers.
+    - `keeps polling in background after waitMs (every 5 s, max 2 min) and fires onResolved once`.
+    - `404 or network error returns null without throwing`.
+  - `revenuecat.test.ts`:
+    - `rcAttributes maps a link install`: `{source:'TikTok', utm_campaign:'launch', utm_content:'v2'}` gives `{mediaSource:'TikTok', campaign:'launch', ad:'v2'}`.
+    - `rcAttributes maps Search Ads`: campaign, adGroup and keyword come from the asa ids as strings.
+    - `syncRevenueCat sets appdash_install_id before attribution resolves`.
+    - `syncRevenueCat sets only non-null attributes and calls syncAttributesAndOfferingsIfNeeded`.
+    - `syncRevenueCat tolerates missing optional methods`: an object with only `setAttributes` works.
+    - `late resolution re-applies attributes once`.
+    - `no-op before consent and before init`.
+    - `never throws when purchases methods throw`.
+- [ ] **Step 2:** Run `pnpm --filter @appdash/expo test`. Expected: FAIL.
+- [ ] **Step 3:** Implement. Before writing anything, check the method names against the current `react-native-purchases` type definitions and fix `RevenueCatLike` if they differ.
+- [ ] **Step 4:** Run the tests. Expected: PASS.
+- [ ] **Step 5:** Commit: `feat(sdk): RevenueCat attribute sync`.
+
+### Task 19: Example app and manual checklist
 
 **Files:**
 - Create: `examples/expo-demo/` (`npx create-expo-app@latest` with expo-router), `docs/manual-testing.md`
@@ -678,6 +751,7 @@ The module's own Gradle and podspec files carry the dependencies, so the spec's 
   - A real iOS device build (AdServices token present; Apple returns a test payload in developer mode).
   - Expo Go (no crash, attribution organic).
   - Airplane mode (events arrive after reconnect, no duplicates).
+  - RevenueCat sandbox purchase with `syncRevenueCat`: the RevenueCat customer shows `appdash_install_id` and `$mediaSource`; the webhook event is matched with `attribute`; health shows 100% with install id.
 - [ ] **Step 4:** Commit: `docs: example app and manual test checklist`.
 
 ---
@@ -686,7 +760,7 @@ The module's own Gradle and podspec files carry the dependencies, so the spec's 
 
 Dashboard tasks test pure helpers with Vitest. Screens are verified in the browser preview against `wrangler dev` with seeded data. Add `apps/server/scripts/seed-demo.mjs`, ported from `../datalog/scripts/seed-demo.mjs`: 30 days, about 300 installs, mixed sources, about 20 payments.
 
-### Task 19: Dashboard shell, login, apps
+### Task 20: Dashboard shell, login, apps
 
 **Files:**
 - Create: `apps/dashboard/{package.json,vite.config.ts,tailwind.config.js,postcss.config.js,index.html}`, `src/{main.tsx,App.tsx,styles.css}`, `src/lib/{api.ts,format.ts,query.ts}`
@@ -714,14 +788,14 @@ Dashboard tasks test pure helpers with Vitest. Screens are verified in the brows
 - [ ] **Step 5:** With `wrangler dev` and the seed running, open the preview, log in, and create an app. Expected: the new app appears in the list.
 - [ ] **Step 6:** Commit: `feat(dashboard): shell, login, apps list`.
 
-### Task 20: Overview page
+### Task 21: Overview page
 
 **Files:**
 - Create: `apps/dashboard/src/pages/Overview.tsx`, `src/components/{Chart.tsx,FilterBar.tsx}`
 - Test: `apps/dashboard/test/filters.test.ts`
 
 **Interfaces:**
-- Consumes: `/stats/overview`, `/stats/breakdown` (Task 10); `toSearch` (Task 19).
+- Consumes: `/stats/overview`, `/stats/breakdown` (Task 10); `toSearch` (Task 20).
 - Produces:
   - Overview with the 7 cards from spec §6 and the installs-line + revenue-bars chart. Ranges and ‹ › stepping use Datadash's `Toolbar`.
   - Panel groups: [Channel | Source | Campaign | Search Ads], [Platform | Country | App version | OS | Device], [Screens | Events].
@@ -737,7 +811,7 @@ Dashboard tasks test pure helpers with Vitest. Screens are verified in the brows
   - Zero console errors, checked with `read_console_messages`.
 - [ ] **Step 5:** Commit: `feat(dashboard): overview with chart, panels, filters`.
 
-### Task 21: Customers and install timeline
+### Task 22: Customers and install timeline
 
 **Files:**
 - Create: `apps/dashboard/src/pages/Customers.tsx`, `src/components/InstallModal.tsx` (adapted from `VisitorModal.tsx`)
@@ -752,7 +826,7 @@ Dashboard tasks test pure helpers with Vitest. Screens are verified in the brows
   - Zero console errors.
 - [ ] **Step 3:** Commit: `feat(dashboard): customers journey and install timeline`.
 
-### Task 22: Links page
+### Task 23: Links page
 
 **Files:**
 - Create: `apps/dashboard/src/pages/Links.tsx`
@@ -770,26 +844,29 @@ Dashboard tasks test pure helpers with Vitest. Screens are verified in the brows
 - [ ] **Step 4:** Run the tests. Expected: PASS. Then create a link in the preview and open `/l/<slug>` with a mobile user agent. Expected: 302 to the store.
 - [ ] **Step 5:** Commit: `feat(dashboard): tracked links page`.
 
-### Task 23: Settings page
+### Task 24: Settings page
 
 **Files:**
 - Create: `apps/dashboard/src/pages/Settings.tsx`, `src/lib/snippets.ts`
 - Test: `apps/dashboard/test/snippets.test.ts`
 
 **Interfaces:**
-- Consumes: apps PATCH, rc-secret, erase (Tasks 5, 12).
+- Consumes: apps PATCH, rc-secret, erase, RevenueCat health (Tasks 5, 9, 12).
 - Produces:
-  - `export function installSnippet(host: string, appKey: string): string`: the `pnpm add @appdash/expo` / `npx expo install @appdash/expo` line, plus `Appdash.init`, `<AppdashProvider>`, and the RevenueCat line `Purchases.setAttributes({ appdash_install_id: await Appdash.installId() })`.
+  - `export function installSnippet(host: string, appKey: string): string`: the `pnpm add @appdash/expo` / `npx expo install @appdash/expo` line, plus `Appdash.init`, `<AppdashProvider>`, and the RevenueCat line `await Appdash.syncRevenueCat(Purchases)` placed after `Purchases.configure` and before the first paywall.
   - `export function aiPrompt(host: string, appKey: string): string`: instructions for an AI coding assistant to install the SDK in an Expo project, ending with "Do not send email or name in identify() unless the app's privacy policy covers it."
 
 - [ ] **Step 1: Failing tests.**
-  - `snippet contains host, key and appdash_install_id`.
+  - `snippet contains host, key and syncRevenueCat after Purchases.configure`.
+  - `healthLabel`: `{lastEventAt:null}` gives "No events yet"; 40% gives a warning containing "40%".
   - `aiPrompt contains the privacy sentence`.
 - [ ] **Step 2:** Run the tests. Expected: FAIL.
 - [ ] **Step 3: Implement the sections.**
   - Install (snippet + Copy AI prompt).
   - Stores (bundle id, package, URLs).
-  - RevenueCat: webhook URL `${origin}/api/webhooks/revenuecat/${id}` and a "Generate secret" button that shows the secret once with "Paste this as the Authorization header value in RevenueCat".
+  - RevenueCat:
+    - Webhook URL `${origin}/api/webhooks/revenuecat/${id}` and a "Generate secret" button that shows the secret once with "Paste this as the Authorization header value in RevenueCat".
+    - Health from `GET …/revenuecat/health`, rendered with `healthLabel(h: RcHealth): { text: string; warning: boolean }` (exported from `snippets.ts`). Example: "Last event 5 min ago · 92% carry appdash_install_id · 88% matched". Below 50% the warning reads "Call Appdash.syncRevenueCat(Purchases) on every app start".
   - Data: timezone, retention months, sandbox toggle.
   - Delete user data: input + confirm modal.
   - Danger zone: delete app.
@@ -800,7 +877,7 @@ Dashboard tasks test pure helpers with Vitest. Screens are verified in the brows
 
 ## Milestone 5: ship
 
-### Task 24: README, deploy flow, release
+### Task 25: README, deploy flow, release
 
 **Files:**
 - Modify: `README.md`, `package.json` (root scripts)
@@ -816,7 +893,7 @@ Dashboard tasks test pure helpers with Vitest. Screens are verified in the brows
 - [ ] **Step 1: README sections.**
   - "What it tracks".
   - "Deploy for free (~10 minutes)", mirroring Datadash's steps, with `npx wrangler d1 create appdash --location weur` and a note on `--jurisdiction eu`; check the current flag with the `wrangler` skill.
-  - "Add the SDK", "Tracked links", "RevenueCat", "Apple Search Ads", "Privacy" (controller role, consent mode, retention, erasure, Cloudflare DPA, sample privacy-policy paragraph), "Free plan limits" (spec §11 table), "Accuracy notes" (iOS link installs, Expo Go, reinstall = new install), "Local development".
+  - "Add the SDK", "Tracked links", "RevenueCat" (webhook setup, `syncRevenueCat` placement, what appears in RevenueCat Charts/Targeting, the lifecycle event list, the health check, and a note to confirm the RevenueCat plan includes webhooks), "Apple Search Ads", "Privacy" (controller role, consent mode, retention, erasure, Cloudflare DPA, sample privacy-policy paragraph), "Free plan limits" (spec §11 table), "Accuracy notes" (iOS link installs, Expo Go, reinstall = new install), "Local development".
 - [ ] **Step 2:** `release-sdk.yml`: on tag `sdk-v*`, run `pnpm --filter @appdash/shared --filter @appdash/expo publish --provenance --access public` with `id-token: write`.
 - [ ] **Step 3:** Run `pnpm typecheck && pnpm test`. Expected: all PASS. Run `pnpm deploy` against a fresh Cloudflare account per the README. Expected: the dashboard loads and smoke passes against the deployed URL (`node scripts/smoke.mjs https://appdash.<you>.workers.dev`).
 - [ ] **Step 4:** Commit: `docs: README, deploy flow, SDK release workflow`.

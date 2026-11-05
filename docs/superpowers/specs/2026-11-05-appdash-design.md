@@ -76,7 +76,8 @@ Appdash.track('paywall_shown', { variant: 'b' });
 Appdash.identify({ userId: 'u_123', email?: string, name?: string });
 Appdash.reportSource('tiktok');                  // answer from the app's own "how did you hear about us?" UI
 Appdash.optIn(); Appdash.optOut();               // persisted; optOut clears the queue
-await Appdash.installId();                       // for RevenueCat: Purchases.setAttributes({ appdash_install_id: id })
+await Appdash.installId();
+await Appdash.syncRevenueCat(Purchases);         // after Purchases.configure, before the first paywall (§3 RevenueCat sync)
 await Appdash.flush();
 ```
 
@@ -102,6 +103,34 @@ await Appdash.flush();
 - **Consent**: with `requireConsent: true`, nothing is written to storage or sent until `optIn()`; the install id is
   created at opt-in.
 
+### RevenueCat sync
+
+Modelled on Appstack's RevenueCat integration, but built only on RevenueCat's public SDK methods.
+`@appdash/expo` does not depend on `react-native-purchases`: the app passes its `Purchases` object in.
+
+`Appdash.syncRevenueCat(purchases, { waitMs = 3000 })`:
+1. Immediately calls `purchases.setAttributes({ appdash_install_id })`. This is the hard link between our install and
+   the RevenueCat customer.
+2. Reads the install's attribution: from the local cache, or from `GET /api/v1/attribution`, waiting at most `waitMs`.
+3. When resolved, sets RevenueCat's attribution attributes:
+   - `setMediaSource(source)`
+   - `setCampaign(utm_campaign ?? asa_campaign_id)`
+   - `setAdGroup(asa_adgroup_id)`
+   - `setAd(utm_content)`
+   - `setKeyword(utm_term ?? asa_keyword_id)`
+
+   Null values are skipped.
+4. Calls `purchases.syncAttributesAndOfferingsIfNeeded()` when the method exists, so RevenueCat Targeting sees the
+   campaign before the paywall loads.
+
+If the attribution resolves later in the same run (Search Ads can take seconds), the SDK applies step 3 again on its
+own. Attribution is cached in AsyncStorage once resolved. Before consent the whole call is a no-op.
+
+Result: RevenueCat Charts, customer filters and paywall Targeting can segment by our source and campaign. Every
+webhook event carries `appdash_install_id`.
+
+RevenueCat method names are verified against the current `react-native-purchases` during implementation.
+
 ### Native module (Expo Modules API)
 
 - iOS: `AAAttribution.attributionToken()` (iOS 14.3+), returns `null` on error / unsupported.
@@ -115,6 +144,7 @@ await Appdash.flush();
 | Method & path | Auth | Purpose |
 | --- | --- | --- |
 | `POST /api/v1/batch` | `X-App-Key` (public) | Ingest up to 50 events + context. Body ≤ 64 KB. Returns 202. |
+| `GET /api/v1/attribution?iid=` | `X-App-Key` (public) | One install's attribution for the SDK: `{ resolved, method, source, channel, utm_campaign, utm_content, utm_term, asa_campaign_id, asa_adgroup_id, asa_keyword_id }`. 404 if the install is unknown. `resolved: false` while a Search Ads token is pending. |
 | `GET /l/:slug` | none | Tracked link: record click, redirect by platform |
 | `POST /api/webhooks/revenuecat/:appId` | `Authorization` header == app's RC secret | Payment events |
 | `POST /api/auth/login`, `/logout`, `GET /me` | password → HMAC session cookie | Dashboard login (ported) |
@@ -142,8 +172,10 @@ Insert `link_clicks` row with a new `click_id`, platform (from UA), country. Red
 
 ### Cron (daily, 03:00 UTC)
 
-Retry pending AdServices tokens; delete events, sessions and link clicks older than the app's
-`retention_months` (default 25); installs with no session in that period are deleted too.
+- Retry pending AdServices tokens.
+- Delete events, sessions and link clicks older than the app's `retention_months` (default 25). Installs with no
+  session in that period are deleted too.
+- Delete `rc_events` older than 30 days.
 
 ## 5. Data model (D1)
 
@@ -175,6 +207,10 @@ payments(id PK /* RevenueCat event id */, app_id, ts, kind /* payment|refund */,
          event_type, product_id, store, environment, app_user_id, install_id, session_id, matched_by,
          renewal INTEGER)
   INDEX (app_id, ts), (app_id, app_user_id)
+
+rc_events(id PK /* RevenueCat event id */, app_id, ts, type, environment, has_install_attr INTEGER,
+          install_id)   -- delivery log: dedup for every RC event type + integration health
+  INDEX (app_id, ts)
 
 login_failures(ip, ts)  INDEX (ip, ts)
 ```
@@ -211,6 +247,41 @@ Match order → `matched_by`:
 (b) sessions with a non-direct source. Stored in `payments.session_id` (NULL = credited to install attribution).
 A "Try matching again" action re-runs matching for unmatched payments.
 
+### Subscription lifecycle events
+
+Every RevenueCat delivery is first written to `rc_events`, which is the dedup check for all types. When the event
+matches an install, it is also stored as an `events` row: `type = 'event'`, `id = 'rc_' + event.id`,
+`session_id = NULL`, `props = { product_id, store, price_usd }`. It then shows up in the Events panel and on the
+timeline, filterable by source and campaign.
+
+| RevenueCat event | Our event name |
+| --- | --- |
+| `INITIAL_PURCHASE`, `period_type` `TRIAL` | `rc_trial_started` |
+| `INITIAL_PURCHASE`, `period_type` `INTRO` | `rc_intro_started` |
+| `INITIAL_PURCHASE`, other period types | `rc_subscription_started` |
+| `RENEWAL` with `is_trial_conversion` | `rc_trial_converted` |
+| `RENEWAL` | `rc_subscription_renewed` |
+| `NON_RENEWING_PURCHASE` | `rc_in_app_purchase` |
+| `CANCELLATION`, `cancel_reason` `CUSTOMER_SUPPORT` | `rc_refunded` |
+| `CANCELLATION`, other reasons | `rc_subscription_cancelled` (`props.reason`) |
+| `UNCANCELLATION` | `rc_subscription_uncancelled` |
+| `BILLING_ISSUE` | `rc_billing_issue` |
+| `EXPIRATION` | `rc_subscription_expired` |
+| `PRODUCT_CHANGE` | `rc_product_changed` |
+
+Other types are logged in `rc_events` and otherwise ignored. Revenue rules (above) are unchanged.
+
+### Integration health
+
+Computed from `rc_events` over the last 24 h, with sandbox events excluded:
+- time of the last event
+- number of events
+- share of events carrying `appdash_install_id`
+- share of events matched to an install
+
+The dashboard warns when fewer than 50% carry the attribute, as Appstack does. The usual cause is
+`syncRevenueCat` not being called on every app start, or an old app version.
+
 ## 6. Dashboard (`apps/dashboard`)
 
 Desktop layout ported from Datadash.
@@ -225,7 +296,7 @@ Desktop layout ported from Datadash.
 - **Links**: create/edit tracked links; table of clicks → attributed installs → revenue per link.
 - **Settings** per app: app key, install snippet + "Copy AI prompt", store URLs, bundle id/package, RevenueCat
   webhook URL + secret (shown once, stored hashed), timezone, retention months, sandbox toggle,
-  delete user data (by `user_id` or install id).
+  delete user data (by `user_id` or install id), RevenueCat integration health (§5) with a warning below 50%.
 
 Out of MVP: retention cohorts, funnels, live globe, CSV/Power BI exports, Search Ads campaign names,
 multi-user / SaaS mode, other SDKs (bare RN, Swift, Kotlin, Flutter).
@@ -282,7 +353,8 @@ OWASP LLM Top 10 and ISO/IEC 42001 do not apply: the MVP has no AI component.
   timestamp clamping, bundle-id check, link redirects per platform, RevenueCat webhook for each match path and
   refunds, credit logic, auth/lockout, erasure, retention cron.
 - `packages/sdk-expo`: jest-expo with mocked `AppState`, AsyncStorage, `fetch`, `expo-linking` — queue
-  persistence, flush triggers, backoff, session boundaries, consent mode, private-param stripping.
+  persistence, flush triggers, backoff, session boundaries, consent mode, private-param stripping, `syncRevenueCat`
+  (immediate install-id attribute, late attribution re-applied, missing methods tolerated).
 - E2E: `scripts/smoke.mjs` against `wrangler dev` (batch → stats → webhook → customer journey);
   `examples/expo-demo` on iOS simulator and Android emulator.
 - Manual checklist (documented): Install Referrer via Play internal testing track; AdServices token on a real
