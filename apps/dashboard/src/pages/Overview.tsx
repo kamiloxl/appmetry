@@ -1,14 +1,15 @@
-import { useCallback, useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { Chart } from '../components/Chart';
 import { FilterBar } from '../components/FilterBar';
 import { OverviewCard } from '../components/OverviewCard';
 import { Panel, type TabDef } from '../components/Panel';
 import { Toolbar } from '../components/Toolbar';
 import { toggleFilter } from '../lib/filters';
-import { fromSearch, toSearch, type QueryState } from '../lib/query';
+import { toSearch } from '../lib/query';
 import type { Overview as OverviewData } from '../lib/types';
 import { useApi } from '../lib/useApi';
+import { useQueryState } from '../lib/useQueryState';
 
 export { toggleFilter };
 
@@ -22,17 +23,6 @@ const GROUPS: TabDef[][] = [
     { label: 'Events', dim: 'event' },
   ],
 ];
-
-/** Range, interval and filters live in the URL (toSearch/fromSearch); changes replace the history entry's query. */
-function useQueryState(): [QueryState, (p: Partial<QueryState>) => void] {
-  const [params, setParams] = useSearchParams();
-  const q = useMemo(() => fromSearch(params.toString()), [params]);
-  const update = useCallback(
-    (p: Partial<QueryState>) => setParams(toSearch({ ...q, ...p }), { replace: true }),
-    [q, setParams],
-  );
-  return [q, update];
-}
 
 export function Overview() {
   const { id = '' } = useParams();

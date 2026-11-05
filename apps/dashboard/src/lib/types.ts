@@ -48,3 +48,40 @@ export interface BreakdownRow {
   installs: number;
   revenue: number;
 }
+
+/** GET /api/apps/:id/stats/customers row. `total` is USD cents with refunds netted; source and channel may be null. */
+export interface Customer {
+  installId: string;
+  name: string;
+  emoji: string;
+  email: string | null;
+  total: number;
+  payments: number;
+  source: string | null;
+  channel: string | null;
+  matchedBy: string | null;
+  firstSeen: number;
+  firstPaymentAt: number;
+  timeToConvertMs: number;
+}
+
+export type TimelineKind = 'install' | 'session' | 'screen' | 'event' | 'deep_link' | 'payment';
+
+export interface TimelineItem {
+  kind: TimelineKind;
+  ts: number;
+  label: string;
+  detail?: string;
+}
+
+/** GET /api/apps/:id/installs/:installId. `install` is the raw installs row (snake_case columns). */
+export interface InstallDetail {
+  install: Record<string, unknown>;
+  timeline: TimelineItem[];
+}
+
+/** POST /api/apps/:id/payments/rematch. */
+export interface RematchResult {
+  matched: number;
+  remaining: number;
+}

@@ -4,6 +4,7 @@ import { Logo } from './components/Logo';
 import { api } from './lib/api';
 import type { AppInfo, Me } from './lib/types';
 import { Apps } from './pages/Apps';
+import { Customers } from './pages/Customers';
 import { Login } from './pages/Login';
 import { Overview } from './pages/Overview';
 
@@ -118,7 +119,7 @@ export function App() {
         <Route path="/setup" element={<ComingSoon title="Setup wizard coming soon" back={{ to: '/', label: 'Back to your apps' }} />} />
         <Route path="/apps/:id" element={<AppLayout />}>
           <Route index element={<Overview />} />
-          <Route path="customers" element={<Back title="Customers coming soon" />} />
+          <Route path="customers" element={<Customers />} />
           <Route path="links" element={<Back title="Links coming soon" />} />
           <Route path="settings" element={<Back title="Settings coming soon" />} />
           <Route path="setup" element={<Back title="Setup wizard coming soon" />} />
