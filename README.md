@@ -156,16 +156,20 @@ ADMIN_PASSWORD=... pnpm run smoke http://localhost:8787
 
 The example app in [examples/expo-demo](examples/expo-demo) and the checks in [docs/manual-testing.md](docs/manual-testing.md) exercise the SDK on real builds. `pod install` may need `LANG=en_US.UTF-8` in your environment. Android verification is pending: there is no JDK in CI yet.
 
-## Before first release
+## Maintainer to-do
 
-Maintainer checklist:
-
-- [ ] Add the `NPM_TOKEN` repository secret (npm automation token).
 - [ ] Add screenshots of the Cloudflare deploy screens to the "Deploy in 5 minutes" section.
 
 ## Releasing the SDK
 
-Only `appmetry` is published (`@appmetry/shared` is bundled into it and private). Add an npm automation token as the repository secret `NPM_TOKEN`, then push a tag such as `sdk-v0.1.0`. The workflow in `.github/workflows/release-sdk.yml` checks that the tag matches the SDK version in `packages/sdk-expo/package.json`, then builds and publishes with provenance.
+Only `appmetry` is published (`@appmetry/shared` is bundled into it and private). Publishing uses [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers): the `appmetry` package on npmjs.com trusts GitHub Actions in `kamiloxl/appmetry` running `release-sdk.yml`, so no npm token is stored anywhere, and npm attaches a provenance attestation automatically.
+
+To release:
+
+1. Bump `version` in `packages/sdk-expo/package.json` (for example to `0.1.1`) and merge it to `main`.
+2. Push a matching tag: `git tag sdk-v0.1.1 && git push origin sdk-v0.1.1`.
+
+The workflow checks that the tag matches the SDK version, runs typecheck and tests, builds, and publishes.
 
 ## License
 

@@ -28,6 +28,13 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm --filter appmetry build
-      - run: pnpm --filter appmetry publish --provenance --access public --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # npm Trusted Publishing (OIDC): no token is stored. npm >= 11.5.1 is required, and npm adds the
+      # provenance attestation automatically. The trusted publisher is configured on npmjs.com for
+      # kamiloxl/appmetry + release-sdk.yml.
+      - run: npm install -g npm@latest
+      # pnpm pack rewrites workspace: dependencies; npm then publishes that tarball via OIDC.
+      - name: Pack
+        working-directory: packages/sdk-expo
+        run: pnpm pack --pack-destination "$RUNNER_TEMP"
+      - name: Publish to npm
+        run: npm publish "$RUNNER_TEMP"/appmetry-*.tgz --access public
