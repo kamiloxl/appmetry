@@ -32,7 +32,7 @@ export function eraseStatements(db: D1Database, appId: string, ids: string[]): D
 
 /**
  * GDPR erasure of one user (all installs with that `user_id`) or one install. Returns the number of installs removed.
- * With a `user_id` it also clears the RevenueCat `app_user_id` on payments and rc_events that never matched an install.
+ * With a `user_id` it also clears `app_user_id` on all payments and rc_events of the app with that RevenueCat `app_user_id`.
  */
 export async function eraseUser(db: D1Database, appId: string, by: { userId?: string; installId?: string }): Promise<number> {
   let ids: string[];
