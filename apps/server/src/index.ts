@@ -24,6 +24,8 @@ import { customers, installTimeline } from './stats/customers';
 import { isDim, statsContext, type StatsCtx } from './stats/filters';
 import { linkFunnel } from './stats/links';
 import { overview } from './stats/overview';
+import { runDaily } from './cron';
+import { privacyRoutes } from './privacy';
 import { handleRevenueCat, revenuecatRoutes } from './revenuecat';
 
 const app = new Hono<AppEnv>();
@@ -87,6 +89,7 @@ app.get('/api/auth/me', async (c) => c.json({ loggedIn: await isLoggedIn(c) }));
 app.route('/', appsRoutes);
 app.route('/', linksRoutes);
 app.route('/', revenuecatRoutes);
+app.route('/', privacyRoutes);
 
 // ---------- stats (read side of the Overview page)
 
@@ -133,7 +136,7 @@ app.onError((err, c) => {
 
 async function scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
   await purgeLoginFailures(env.DB, controller.scheduledTime);
-  // Task 12: retry pending AdServices tokens and apply data retention.
+  await runDaily(env, controller.scheduledTime);
 }
 
 export default { fetch: app.fetch, scheduled } satisfies ExportedHandler<Env>;
