@@ -125,7 +125,8 @@ describe('password login', () => {
     ]) {
       const res = await call(path, { method });
       expect(res.status, `${method} ${path}`).not.toBe(401);
-      expect([404, 405], `${method} ${path}`).toContain(res.status);
+      // Implemented routes answer for themselves (400 for an empty batch, 204 for CORS preflight); the rest are 404/405.
+      expect([204, 400, 404, 405], `${method} ${path}`).toContain(res.status);
     }
   });
 

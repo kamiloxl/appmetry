@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import {
   apiGuard,
   clearSession,
@@ -14,12 +15,20 @@ import {
 } from './auth';
 import { appsRoutes } from './apps';
 import type { AppEnv, Env } from './env';
+import { handleBatch } from './ingest';
 import { passwordsMatch } from './lib/crypto';
 
 const app = new Hono<AppEnv>();
 
+// The SDK API is called from apps (and Expo web), never with cookies: any origin, app key header only.
+app.use('/api/v1/*', cors({ origin: '*', allowMethods: ['POST', 'GET', 'OPTIONS'], allowHeaders: ['X-App-Key', 'Content-Type'], maxAge: 86_400 }));
+
 // Default-deny: every /api route needs a session unless it is on the allowlist in auth.ts.
 app.use('/api/*', apiGuard);
+
+// ---------- SDK ingestion (public to apiGuard; authenticates with X-App-Key)
+
+app.post('/api/v1/batch', handleBatch);
 
 // ---------- login
 
