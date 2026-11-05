@@ -1,4 +1,4 @@
--- appdash schema (spec §5). All times are INTEGER milliseconds since the epoch, UTC.
+-- appmetry schema (spec §5). All times are INTEGER milliseconds since the epoch, UTC.
 
 CREATE TABLE apps (
   id TEXT PRIMARY KEY,

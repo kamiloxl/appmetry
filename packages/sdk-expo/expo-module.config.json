@@ -1,9 +1,9 @@
 {
   "platforms": ["apple", "android"],
   "apple": {
-    "modules": ["AppdashAttributionModule"]
+    "modules": ["AppmetryAttributionModule"]
   },
   "android": {
-    "modules": ["expo.modules.appdashattribution.AppdashAttributionModule"]
+    "modules": ["expo.modules.appmetryattribution.AppmetryAttributionModule"]
   }
 }

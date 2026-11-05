@@ -46,7 +46,7 @@ interface FirstInstall {
 
 /**
  * Where setup stands, from four cheap reads in one round trip: the earliest install, the earliest RevenueCat event,
- * the earliest one that carried appdash_install_id, and the stored state (read fresh, not from the per-isolate app cache,
+ * the earliest one that carried appmetry_install_id, and the stored state (read fresh, not from the per-isolate app cache,
  * so a skip made on another isolate is never missed). A stored `skipped`/`done` wins over detection.
  */
 export async function setupStatus(db: D1Database, app: AppRow): Promise<SetupStatus> {

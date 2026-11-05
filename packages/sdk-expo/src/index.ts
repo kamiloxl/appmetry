@@ -1,12 +1,12 @@
-export { Appdash, type AppdashOptions } from './client';
+export { Appmetry, type AppmetryOptions } from './client';
 export { createStore, type KV } from './storage';
 export { Queue, QUEUE_KEY } from './queue';
 export { Transport, type SendResult, type TransportOptions } from './transport';
 export { Flusher, type FlusherOptions, BACKOFF_MIN_MS, BACKOFF_MAX_MS } from './flusher';
 export { SessionTracker } from './session';
 export { setDebug } from './log';
-export type { Batch, BatchContext, SdkEvent } from '@appdash/shared';
-export { AppdashProvider } from './provider';
+export type { Batch, BatchContext, SdkEvent } from '@appmetry/shared';
+export { AppmetryProvider } from './provider';
 export { AttributionCache } from './attribution';
 export { rcAttributes, type RevenueCatLike } from './revenuecat';
-export type { AttributionResponse } from '@appdash/shared';
+export type { AttributionResponse } from '@appmetry/shared';

@@ -8,7 +8,7 @@ import {
   type InstallAttribution,
   type LinkTouch,
   type SdkEvent,
-} from '@appdash/shared';
+} from '@appmetry/shared';
 import { exchangeAdServicesToken } from './adservices';
 import { getAppByKey, type AppEnv, type AppRow } from './env';
 import { ATTRIBUTION_COLUMNS, mergeIntoInstall, rowToAttribution, type InstallAttrRow, type OnInstall } from './ingest';

@@ -1,24 +1,24 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
-// Point the demo at your appdash server. With `wrangler dev` on this machine:
-//   EXPO_PUBLIC_APPDASH_HOST=http://localhost:8787   (iOS simulator)
-//   EXPO_PUBLIC_APPDASH_HOST=http://10.0.2.2:8787    (Android emulator)
-//   EXPO_PUBLIC_APPDASH_KEY=app_...                  (from the dashboard or POST /api/apps)
+// Point the demo at your appmetry server. With `wrangler dev` on this machine:
+//   EXPO_PUBLIC_APPMETRY_HOST=http://localhost:8787   (iOS simulator)
+//   EXPO_PUBLIC_APPMETRY_HOST=http://10.0.2.2:8787    (Android emulator)
+//   EXPO_PUBLIC_APPMETRY_KEY=app_...                  (from the dashboard or POST /api/apps)
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: 'appdash demo',
-  slug: 'appdash-expo-demo',
+  name: 'appmetry demo',
+  slug: 'appmetry-expo-demo',
   version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/images/icon.png',
-  scheme: 'appdashdemo',
+  scheme: 'appmetrydemo',
   userInterfaceStyle: 'automatic',
   ios: {
     supportsTablet: true,
-    bundleIdentifier: 'dev.appdash.demo',
+    bundleIdentifier: 'dev.appmetry.demo',
   },
   android: {
-    package: 'dev.appdash.demo',
+    package: 'dev.appmetry.demo',
     adaptiveIcon: {
       backgroundColor: '#E6F4FE',
       foregroundImage: './assets/images/android-icon-foreground.png',
@@ -44,7 +44,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ],
   ],
   extra: {
-    appdashHost: process.env.EXPO_PUBLIC_APPDASH_HOST ?? '',
-    appdashKey: process.env.EXPO_PUBLIC_APPDASH_KEY ?? '',
+    appmetryHost: process.env.EXPO_PUBLIC_APPMETRY_HOST ?? '',
+    appmetryKey: process.env.EXPO_PUBLIC_APPMETRY_KEY ?? '',
   },
 });

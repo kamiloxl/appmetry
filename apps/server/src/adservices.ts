@@ -1,4 +1,4 @@
-import type { AdServicesResult } from '@appdash/shared';
+import type { AdServicesResult } from '@appmetry/shared';
 
 export type AdServicesOutcome = { status: 'ok'; result: AdServicesResult } | { status: 'retry' } | { status: 'invalid' };
 

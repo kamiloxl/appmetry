@@ -1,4 +1,4 @@
-import { friendlyName } from '@appdash/shared';
+import { friendlyName } from '@appmetry/shared';
 
 // Emoji only: the CSP (public/_headers) blocks third-party images such as favicon services.
 

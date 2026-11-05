@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, type ReactNode } from 'react';
 
-import { Appdash } from './client';
+import { Appmetry } from './client';
 import { log } from './log';
 
 // expo-router is an optional peer: without it the provider is a pass-through.
@@ -23,13 +23,13 @@ function Tracked({ children, usePath }: { children: ReactNode; usePath: () => st
   useEffect(() => {
     if (!pathname || pathname === last.current) return;
     last.current = pathname;
-    Appdash.screen(pathname);
+    Appmetry.screen(pathname);
   }, [pathname]);
   return <Fragment>{children}</Fragment>;
 }
 
 /** Tracks a screen event whenever the expo-router pathname changes. Renders no wrapper element. */
-export function AppdashProvider({ children }: { children: ReactNode }) {
+export function AppmetryProvider({ children }: { children: ReactNode }) {
   if (!usePathname) return <Fragment>{children}</Fragment>;
   return <Tracked usePath={usePathname}>{children}</Tracked>;
 }

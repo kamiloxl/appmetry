@@ -1,7 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { AttributionResponse, SdkEvent } from '@appdash/shared';
+import type { AttributionResponse, SdkEvent } from '@appmetry/shared';
 import worker from '../src/index';
 import type { AppRow, Env } from '../src/env';
 import { exchangeAdServicesToken } from '../src/adservices';

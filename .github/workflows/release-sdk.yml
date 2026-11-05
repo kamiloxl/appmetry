@@ -27,7 +27,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
-      - run: pnpm --filter @appdash/expo build
-      - run: pnpm --filter @appdash/expo publish --provenance --access public --no-git-checks
+      - run: pnpm --filter appmetry build
+      - run: pnpm --filter appmetry publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

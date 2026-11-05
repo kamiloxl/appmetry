@@ -1,4 +1,4 @@
-package expo.modules.appdashattribution
+package expo.modules.appmetryattribution
 
 import android.os.Handler
 import android.os.Looper
@@ -12,9 +12,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 private const val TIMEOUT_MS = 10_000L
 
 // Install attribution inputs: Play Install Referrer.
-class AppdashAttributionModule : Module() {
+class AppmetryAttributionModule : Module() {
   override fun definition() = ModuleDefinition {
-    Name("AppdashAttribution")
+    Name("AppmetryAttribution")
 
     // Resolves { referrer, clickTs, installTs } (seconds) or null. Never rejects.
     AsyncFunction("getInstallReferrer") { promise: Promise ->

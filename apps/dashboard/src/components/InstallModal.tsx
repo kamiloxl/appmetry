@@ -1,4 +1,4 @@
-import { friendlyName } from '@appdash/shared';
+import { friendlyName } from '@appmetry/shared';
 import { duration, money } from '../lib/format';
 import { groupByDay, KIND_META } from '../lib/timeline';
 import type { Customer, InstallDetail } from '../lib/types';

@@ -56,11 +56,11 @@ export function rcEvent(patch: Partial<RcFixtureEvent> = {}): RcFixtureEvent {
   };
 }
 
-/** Add the appdash install id attribute (what `syncRevenueCat` sets in the app). */
+/** Add the appmetry install id attribute (what `syncRevenueCat` sets in the app). */
 export function withInstallAttr(ev: RcFixtureEvent, installId: string): RcFixtureEvent {
   return {
     ...ev,
-    subscriber_attributes: { ...ev.subscriber_attributes, appdash_install_id: { value: installId, updated_at_ms: Date.now() - 3000 } },
+    subscriber_attributes: { ...ev.subscriber_attributes, appmetry_install_id: { value: installId, updated_at_ms: Date.now() - 3000 } },
   };
 }
 

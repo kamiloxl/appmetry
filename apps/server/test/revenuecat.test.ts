@@ -330,7 +330,7 @@ describe('RevenueCat lifecycle events', () => {
 });
 
 describe('RevenueCat integration health', () => {
-  it('rcHealth counts last 24h production events, share with appdash_install_id and share matched', async () => {
+  it('rcHealth counts last 24h production events, share with appmetry_install_id and share matched', async () => {
     const { app, secret } = await setup();
     await addInstall(app, 'install-health1');
     const now = Date.now();
@@ -382,7 +382,7 @@ describe('RevenueCat integration health', () => {
 });
 
 describe('RevenueCat install matching', () => {
-  it('matches by subscriber_attributes.appdash_install_id', async () => {
+  it('matches by subscriber_attributes.appmetry_install_id', async () => {
     const { app, secret } = await setup();
     await addInstall(app, 'install-attr-01');
     await addInstall(app, 'install-attr-02', { user_id: 'user-attr' });
@@ -449,7 +449,7 @@ describe('RevenueCat install matching', () => {
         id: 'e2',
         type: 'RENEWAL',
         app_user_id: 'install-other-1',
-        subscriber_attributes: { appdash_install_id: { value: 'install-other-1' } },
+        subscriber_attributes: { appmetry_install_id: { value: 'install-other-1' } },
       } as RcEvent),
     ).toEqual({ installId: null, matchedBy: 'none' });
   });

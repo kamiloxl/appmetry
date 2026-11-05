@@ -1,9 +1,9 @@
-import type { AttributionResponse } from '@appdash/shared';
+import type { AttributionResponse } from '@appmetry/shared';
 
 import { log } from './log';
 import type { KV } from './storage';
 
-export const ATTRIBUTION_KEY = 'appdash:attribution';
+export const ATTRIBUTION_KEY = 'appmetry:attribution';
 const FOREGROUND_INTERVAL_MS = 1000;
 const BACKGROUND_INTERVAL_MS = 5000;
 const BACKGROUND_MAX_MS = 2 * 60_000;
@@ -13,7 +13,7 @@ type Poll = { kind: 'resolved'; a: AttributionResponse } | { kind: 'pending' } |
 
 /**
  * Looks up the install's resolved source on the server and caches it once resolved.
- * Never throws. A resolved lookup is stored under `appdash:attribution` together with its iid.
+ * Never throws. A resolved lookup is stored under `appmetry:attribution` together with its iid.
  */
 export class AttributionCache {
   private readonly base: string;

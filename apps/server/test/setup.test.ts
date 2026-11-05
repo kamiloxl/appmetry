@@ -50,7 +50,7 @@ describe('GET /api/apps/:id/setup', () => {
     expect(s.steps.revenuecatSync.done).toBe(false);
   });
 
-  it('event with appdash_install_id marks revenuecatSync', async () => {
+  it('event with appmetry_install_id marks revenuecatSync', async () => {
     const app = await createApp(cookie);
     await addRc(app, `${app.id}-rc1`, 'INITIAL_PURCHASE', true);
     const s = await get(app);

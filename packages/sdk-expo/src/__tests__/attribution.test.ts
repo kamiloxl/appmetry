@@ -1,4 +1,4 @@
-import type { AttributionResponse } from '@appdash/shared';
+import type { AttributionResponse } from '@appmetry/shared';
 
 import { AttributionCache } from '../attribution';
 import type { KV } from '../storage';
@@ -65,7 +65,7 @@ afterEach(() => {
 describe('AttributionCache', () => {
   it('returns cached resolved attribution without fetching', async () => {
     const kv = new MemoryKV();
-    kv.map.set('appdash:attribution', JSON.stringify({ iid: IID, attribution: resolved() }));
+    kv.map.set('appmetry:attribution', JSON.stringify({ iid: IID, attribution: resolved() }));
     const f = jest.fn();
     expect(await make(kv, f).get(IID, 3000)).toEqual(resolved());
     expect(f).not.toHaveBeenCalled();
@@ -73,11 +73,11 @@ describe('AttributionCache', () => {
 
   it('ignores a cached attribution for a different iid', async () => {
     const kv = new MemoryKV();
-    kv.map.set('appdash:attribution', JSON.stringify({ iid: 'other-iid-0001', attribution: resolved({ source: 'Old' }) }));
+    kv.map.set('appmetry:attribution', JSON.stringify({ iid: 'other-iid-0001', attribution: resolved({ source: 'Old' }) }));
     const f = jest.fn(async () => json(200, resolved({ source: 'New' })));
     expect((await make(kv, f).get(IID, 3000))?.source).toBe('New');
     expect(f).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(kv.map.get('appdash:attribution')!).iid).toBe(IID);
+    expect(JSON.parse(kv.map.get('appmetry:attribution')!).iid).toBe(IID);
   });
 
   it('fetches GET <host>/api/v1/attribution?iid= with X-App-Key and caches when resolved', async () => {
@@ -87,7 +87,7 @@ describe('AttributionCache', () => {
     expect(r).toEqual(resolved());
     expect(f.mock.calls[0][0]).toBe(`https://x.example/api/v1/attribution?iid=${IID}`);
     expect((f.mock.calls[0][1] as RequestInit).headers).toEqual({ 'X-App-Key': 'app_test' });
-    expect(JSON.parse(kv.map.get('appdash:attribution')!)).toEqual({ iid: IID, attribution: resolved() });
+    expect(JSON.parse(kv.map.get('appmetry:attribution')!)).toEqual({ iid: IID, attribution: resolved() });
   });
 
   it('polls every 1 s until resolved or waitMs, then returns null', async () => {
@@ -101,7 +101,7 @@ describe('AttributionCache', () => {
     await advance(2000);
     expect(f).toHaveBeenCalledTimes(4);
     expect(await p).toBeNull();
-    expect(kv.map.has('appdash:attribution')).toBe(false);
+    expect(kv.map.has('appmetry:attribution')).toBe(false);
   });
 
   it('returns as soon as a poll resolves', async () => {
@@ -129,7 +129,7 @@ describe('AttributionCache', () => {
     await advance(5000);
     expect(cb).toHaveBeenCalledTimes(1);
     expect(cb).toHaveBeenCalledWith(resolved());
-    expect(JSON.parse(kv.map.get('appdash:attribution')!).iid).toBe(IID);
+    expect(JSON.parse(kv.map.get('appmetry:attribution')!).iid).toBe(IID);
     const n = f.mock.calls.length;
     await advance(60_000);
     expect(f).toHaveBeenCalledTimes(n); // poller stopped

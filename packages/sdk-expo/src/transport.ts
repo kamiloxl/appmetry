@@ -1,4 +1,4 @@
-import type { Batch } from '@appdash/shared';
+import type { Batch } from '@appmetry/shared';
 
 import { log } from './log';
 

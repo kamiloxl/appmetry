@@ -207,11 +207,11 @@ function StepSync({ st }: { st: StepStatus | undefined }) {
       </p>
       <div className="flex items-center gap-2">
         <pre className="min-w-0 flex-1 overflow-x-auto rounded-xl bg-stone-50 p-3 text-xs text-stone-700">
-          <code>await Appdash.syncRevenueCat(Purchases);</code>
+          <code>await Appmetry.syncRevenueCat(Purchases);</code>
         </pre>
-        <CopyButton text="await Appdash.syncRevenueCat(Purchases);" />
+        <CopyButton text="await Appmetry.syncRevenueCat(Purchases);" />
       </div>
-      <Detect st={st} waiting="Waiting for the first purchase that carries appdash_install_id…" doneText="Install id reaches RevenueCat" />
+      <Detect st={st} waiting="Waiting for the first purchase that carries appmetry_install_id…" doneText="Install id reaches RevenueCat" />
       {!st?.done && <p className="text-sm text-stone-500">This only turns green after a real or sandbox purchase. You can skip it now: it stays at “waiting for first purchase” in Settings.</p>}
     </div>
   );
@@ -301,7 +301,7 @@ function StepPrivacy({ app, onSaved }: { app: AppInfo; onSaved: (a: AppInfo) => 
         </div>
       </form>
       <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        Consent: if your app needs consent before collecting data (for example under PECR in the UK or the ePrivacy rules in the EU), initialise the SDK with <code>requireConsent: true</code>. It then collects and sends nothing until you call <code>Appdash.optIn()</code>.
+        Consent: if your app needs consent before collecting data (for example under PECR in the UK or the ePrivacy rules in the EU), initialise the SDK with <code>requireConsent: true</code>. It then collects and sends nothing until you call <code>Appmetry.optIn()</code>.
       </p>
       <div>
         <div className="flex items-center justify-between">

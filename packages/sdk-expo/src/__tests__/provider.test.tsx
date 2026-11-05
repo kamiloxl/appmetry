@@ -3,26 +3,26 @@ import TestRenderer from 'react-test-renderer';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-jest.mock('../client', () => ({ Appdash: { screen: jest.fn() } }));
+jest.mock('../client', () => ({ Appmetry: { screen: jest.fn() } }));
 
 let mockPath = '/';
 jest.mock('expo-router', () => ({ usePathname: () => mockPath }), { virtual: true });
 
 import { Text } from 'react-native';
 
-import { Appdash } from '../client';
-import { AppdashProvider } from '../provider';
+import { Appmetry } from '../client';
+import { AppmetryProvider } from '../provider';
 
-const screen = Appdash.screen as jest.Mock;
+const screen = Appmetry.screen as jest.Mock;
 beforeEach(() => {
   screen.mockClear();
   mockPath = '/';
 });
 
 const tree = (r: TestRenderer.ReactTestRenderer) => r.toJSON();
-const el = (child = 'hello') => createElement(AppdashProvider, null, createElement(Text, null, child));
+const el = (child = 'hello') => createElement(AppmetryProvider, null, createElement(Text, null, child));
 
-describe('AppdashProvider', () => {
+describe('AppmetryProvider', () => {
   it('provider tracks pathname changes once per change', () => {
     mockPath = '/home';
     let r!: TestRenderer.ReactTestRenderer;

@@ -44,7 +44,7 @@ const ID_MAX = 255;
 const TYPE_MAX = 64;
 const TEXT_MAX = 255;
 const DAY_MS = 86_400_000;
-/** Below this share of 24 h production events carrying `appdash_install_id`, the dashboard warns. */
+/** Below this share of 24 h production events carrying `appmetry_install_id`, the dashboard warns. */
 const HEALTH_MIN_SHARE = 0.5;
 
 const PAYMENT_TYPES = new Set(['INITIAL_PURCHASE', 'RENEWAL', 'NON_RENEWING_PURCHASE']);

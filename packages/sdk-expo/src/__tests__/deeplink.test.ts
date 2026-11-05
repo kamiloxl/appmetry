@@ -1,6 +1,6 @@
-import type { Batch, SdkEvent } from '@appdash/shared';
+import type { Batch, SdkEvent } from '@appmetry/shared';
 
-import { createAppdash } from '../client';
+import { createAppmetry } from '../client';
 import { resetDeepLinksForTests } from '../deeplink';
 import type { KV } from '../storage';
 
@@ -47,7 +47,7 @@ function setup(initialUrl: string | null = null, opts: { clockStep?: number; get
   };
   let n = 0;
   let clock = 1_700_000_000_000;
-  const api = createAppdash({
+  const api = createAppmetry({
     store: kv,
     appState: { currentState: 'active', addEventListener: () => ({ remove() {} }) },
     fetchFn: fetchFn as unknown as typeof fetch,

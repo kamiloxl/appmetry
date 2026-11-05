@@ -1,4 +1,4 @@
-import { Appdash } from '@appdash/expo';
+import { Appmetry } from 'appmetry';
 import { useFocusEffect } from 'expo-router';
 import { useCallback } from 'react';
 import { Button, StyleSheet } from 'react-native';
@@ -9,15 +9,15 @@ export default function PaywallScreen() {
   // Tabs stay mounted, so track on every focus rather than on mount.
   useFocusEffect(
     useCallback(() => {
-      Appdash.track('paywall_shown');
+      Appmetry.track('paywall_shown');
     }, []),
   );
 
   // No purchase SDK in the demo: a real app would call Purchases.purchasePackage() here,
-  // after `Appdash.syncRevenueCat(Purchases)` (see docs/manual-testing.md).
+  // after `Appmetry.syncRevenueCat(Purchases)` (see docs/manual-testing.md).
   const fakePurchase = async () => {
-    console.log('[appdash demo] install id:', await Appdash.installId());
-    Appdash.track('purchase_clicked');
+    console.log('[appmetry demo] install id:', await Appmetry.installId());
+    Appmetry.track('purchase_clicked');
   };
 
   return (

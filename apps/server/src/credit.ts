@@ -1,7 +1,7 @@
 import type { RcEvent } from './revenuecat';
 
-/** RevenueCat attribute the SDK's `syncRevenueCat` sets to the appdash install id. */
-export const INSTALL_ATTR = 'appdash_install_id';
+/** RevenueCat attribute the SDK's `syncRevenueCat` sets to the appmetry install id. */
+export const INSTALL_ATTR = 'appmetry_install_id';
 
 export type MatchedBy = 'attribute' | 'user_id' | 'install_id' | 'none';
 
@@ -12,7 +12,7 @@ const MAX_USER_IDS = 50;
 
 const idValue = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 && v.length <= ID_MAX ? v : null);
 
-/** The `appdash_install_id` attribute value, or null when absent or not a non-empty string. */
+/** The `appmetry_install_id` attribute value, or null when absent or not a non-empty string. */
 export function installAttr(ev: RcEvent): string | null {
   const attrs = ev.subscriber_attributes;
   if (!attrs || typeof attrs !== 'object') return null;
@@ -43,7 +43,7 @@ async function installExists(db: D1Database, appId: string, id: string): Promise
 
 /**
  * Link a RevenueCat event to an install of this app (spec §5 "Payment matching"):
- * 1. `appdash_install_id` attribute is an install id → `attribute`
+ * 1. `appmetry_install_id` attribute is an install id → `attribute`
  * 2. app_user_id / original_app_user_id / aliases equals `installs.user_id`, most recently seen install → `user_id`
  * 3. app_user_id is an install id → `install_id`
  * 4. otherwise `none`.

@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { SdkEvent } from '@appdash/shared';
+import type { SdkEvent } from '@appmetry/shared';
 
 import { Queue } from '../queue';
 import { createStore, type KV } from '../storage';
@@ -8,7 +8,7 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
 );
 
-const KEY = 'appdash:queue';
+const KEY = 'appmetry:queue';
 
 function ev(id: string): SdkEvent {
   return { id: `evt-${id}`.padEnd(8, '0'), type: 'event', name: 'tap', ts: 1_700_000_000_000, sid: 'session-1' };

@@ -1,15 +1,15 @@
-import type { SdkEvent } from '@appdash/shared';
+import type { SdkEvent } from '@appmetry/shared';
 
 import { log } from './log';
 import type { KV } from './storage';
 
-export const QUEUE_KEY = 'appdash:queue';
+export const QUEUE_KEY = 'appmetry:queue';
 
 const isEvent = (v: unknown): v is SdkEvent =>
   typeof v === 'object' && v !== null && typeof (v as SdkEvent).id === 'string';
 
 /**
- * Persistent FIFO of events waiting to be sent, stored as a JSON array under `appdash:queue`.
+ * Persistent FIFO of events waiting to be sent, stored as a JSON array under `appmetry:queue`.
  * The in-memory array is the source of truth; every change is written in full, and writes are
  * chained so they reach storage in order and the last write always holds the latest state.
  */

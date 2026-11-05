@@ -1,5 +1,5 @@
 {
-  "name": "@appdash/server",
+  "name": "@appmetry/server",
   "version": "0.1.0",
   "private": true,
   "license": "FSL-1.1-MIT",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@appdash/shared": "workspace:*",
+    "@appmetry/shared": "workspace:*",
     "hono": "^4.13.16"
   },
   "devDependencies": {

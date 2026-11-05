@@ -1,4 +1,4 @@
-import type { Batch } from '@appdash/shared';
+import type { Batch } from '@appmetry/shared';
 
 import { Transport } from '../transport';
 
@@ -25,12 +25,12 @@ function fetchReturning(status: number) {
 describe('Transport', () => {
   test('posts to <host>/api/v1/batch with X-App-Key and JSON', async () => {
     const fetchFn = fetchReturning(202);
-    const t = new Transport({ host: 'https://appdash.example.workers.dev', appKey: 'app_key123', fetchFn });
+    const t = new Transport({ host: 'https://appmetry.example.workers.dev', appKey: 'app_key123', fetchFn });
     await t.send(batch);
 
     expect(fetchFn).toHaveBeenCalledTimes(1);
     const [url, init] = fetchFn.mock.calls[0];
-    expect(url).toBe('https://appdash.example.workers.dev/api/v1/batch');
+    expect(url).toBe('https://appmetry.example.workers.dev/api/v1/batch');
     expect(init?.method).toBe('POST');
     expect(init?.headers).toEqual({ 'Content-Type': 'application/json', 'X-App-Key': 'app_key123' });
     expect(JSON.parse(init?.body as string)).toEqual(batch);

@@ -1,7 +1,7 @@
 // Response shapes of the Worker API, declared here on purpose: the browser bundle never imports server code (ruling R4).
 // Keep in sync with apps/server/src (apps.ts, stats/*).
 
-export type { Channel } from '@appdash/shared';
+export type { Channel } from '@appmetry/shared';
 
 /** GET /api/apps item. The RevenueCat secret hash never leaves the server; `has_rc_secret` says whether one is set. */
 export interface AppInfo {
@@ -118,7 +118,7 @@ export interface RcHealth {
   events24h: number;
   withInstallId24h: number;
   matched24h: number;
-  /** True when fewer than 50% of the 24 h events carry appdash_install_id. */
+  /** True when fewer than 50% of the 24 h events carry appmetry_install_id. */
   warning: boolean;
 }
 

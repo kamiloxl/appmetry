@@ -1,5 +1,5 @@
 {
-  "name": "appdash",
+  "name": "appmetry",
   "private": true,
   "license": "FSL-1.1-MIT",
   "engines": {
@@ -9,7 +9,7 @@
   "scripts": {
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "build": "pnpm --filter @appdash/dashboard --if-present build",
+    "build": "pnpm --filter @appmetry/dashboard --if-present build",
     "predev": "node scripts/ensure-dist.mjs && wrangler d1 migrations apply DB --local",
     "dev": "wrangler dev --port 8787",
     "seed": "node apps/server/scripts/seed-demo.mjs && wrangler d1 execute DB --local --file .wrangler/seed.sql",

@@ -1,8 +1,8 @@
 {
-  "name": "@appdash/expo",
+  "name": "appmetry",
   "version": "0.1.0",
-  "description": "appdash SDK for Expo apps: offline event queue, sessions and install attribution",
-  "author": "appdash contributors",
+  "description": "appmetry SDK for Expo apps: offline event queue, sessions and install attribution",
+  "author": "appmetry contributors",
   "main": "build/index.js",
   "module": "build/index.mjs",
   "types": "build/index.d.ts",
@@ -43,13 +43,13 @@
     "expo",
     "analytics",
     "attribution",
-    "AppdashAttribution"
+    "AppmetryAttribution"
   ],
-  "repository": "https://github.com/kamiloxl/appdash",
+  "repository": "https://github.com/kamiloxl/appmetry",
   "bugs": {
-    "url": "https://github.com/kamiloxl/appdash/issues"
+    "url": "https://github.com/kamiloxl/appmetry/issues"
   },
-  "homepage": "https://github.com/kamiloxl/appdash#readme",
+  "homepage": "https://github.com/kamiloxl/appmetry#readme",
   "license": "FSL-1.1-MIT",
   "peerDependencies": {
     "@react-native-async-storage/async-storage": "*",
@@ -64,7 +64,7 @@
     "react-native": "*"
   },
   "devDependencies": {
-    "@appdash/shared": "workspace:*",
+    "@appmetry/shared": "workspace:*",
     "@babel/core": "^7.26.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native/jest-preset": "0.88.1",

@@ -3,11 +3,11 @@ plugins {
   id 'expo-module-gradle-plugin'
 }
 
-group = 'expo.modules.appdashattribution'
+group = 'expo.modules.appmetryattribution'
 version = '0.1.0'
 
 android {
-  namespace "expo.modules.appdashattribution"
+  namespace "expo.modules.appmetryattribution"
   defaultConfig {
     versionCode 1
     versionName "0.1.0"

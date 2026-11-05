@@ -1,6 +1,6 @@
-import type { AttributionResponse } from '@appdash/shared';
+import type { AttributionResponse } from '@appmetry/shared';
 
-import { createAppdash } from '../client';
+import { createAppmetry } from '../client';
 import { rcAttributes, type RevenueCatLike } from '../revenuecat';
 import type { KV } from '../storage';
 
@@ -71,7 +71,7 @@ function setup(opts: { attribution?: () => Response | Promise<Response>; require
     return { status: 200 } as Response;
   });
   let n = 0;
-  const api = createAppdash({
+  const api = createAppmetry({
     store: kv,
     appState: { currentState: 'active', addEventListener: () => ({ remove() {} }) },
     fetchFn: fetchFn as unknown as typeof fetch,
@@ -111,14 +111,14 @@ describe('rcAttributes', () => {
   });
 });
 
-describe('Appdash.syncRevenueCat', () => {
-  it('sets appdash_install_id before attribution resolves', async () => {
+describe('Appmetry.syncRevenueCat', () => {
+  it('sets appmetry_install_id before attribution resolves', async () => {
     const a = setup({ attribution: () => new Promise<Response>(() => {}) });
     await advance(0);
     const p = rc();
     const done = a.api.syncRevenueCat(p, { waitMs: 3000 });
     await advance(10);
-    expect(p.setAttributes).toHaveBeenCalledWith({ appdash_install_id: await a.api.installId() });
+    expect(p.setAttributes).toHaveBeenCalledWith({ appmetry_install_id: await a.api.installId() });
     expect(p.setMediaSource).not.toHaveBeenCalled();
     await advance(20_000);
     await done;
@@ -170,7 +170,7 @@ describe('Appdash.syncRevenueCat', () => {
   });
 
   it('no-op before init', async () => {
-    const api = createAppdash({ os: 'ios' });
+    const api = createAppmetry({ os: 'ios' });
     const p = rc();
     await api.syncRevenueCat(p);
     expect(p.setAttributes).not.toHaveBeenCalled();
@@ -221,11 +221,11 @@ describe('Appdash.syncRevenueCat', () => {
     const done = a.api.syncRevenueCat(p, { waitMs: 0 });
     await advance(10);
     await done;
-    a.kv.map.set('appdash:attribution', 'stale');
+    a.kv.map.set('appmetry:attribution', 'stale');
     a.fetchFn.mockClear();
     a.api.optOut();
     await advance(30_000);
-    expect(a.kv.map.has('appdash:attribution')).toBe(false);
+    expect(a.kv.map.has('appmetry:attribution')).toBe(false);
     expect(a.calls.filter(() => true).length).toBeGreaterThan(0);
     expect(a.fetchFn.mock.calls.filter((c) => String(c[0]).includes('/attribution'))).toHaveLength(0);
     expect(p.setMediaSource).not.toHaveBeenCalled();

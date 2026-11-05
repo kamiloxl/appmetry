@@ -1,4 +1,4 @@
-import { Appdash, AppdashProvider } from '@appdash/expo';
+import { Appmetry, AppmetryProvider } from 'appmetry';
 import Constants from 'expo-constants';
 import { useFonts } from 'expo-font';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
@@ -13,14 +13,14 @@ export {
   ErrorBoundary,
 } from 'expo-router';
 
-// Host and key come from app.config.ts `extra` (EXPO_PUBLIC_APPDASH_HOST / EXPO_PUBLIC_APPDASH_KEY).
-const extra = (Constants.expoConfig?.extra ?? {}) as { appdashHost?: string; appdashKey?: string };
+// Host and key come from app.config.ts `extra` (EXPO_PUBLIC_APPMETRY_HOST / EXPO_PUBLIC_APPMETRY_KEY).
+const extra = (Constants.expoConfig?.extra ?? {}) as { appmetryHost?: string; appmetryKey?: string };
 
 // Initialize once, at module load, before any screen renders.
-if (extra.appdashHost && extra.appdashKey) {
-  Appdash.init({ appKey: extra.appdashKey, host: extra.appdashHost, debug: __DEV__ });
+if (extra.appmetryHost && extra.appmetryKey) {
+  Appmetry.init({ appKey: extra.appmetryKey, host: extra.appmetryHost, debug: __DEV__ });
 } else {
-  console.warn('[appdash demo] Set EXPO_PUBLIC_APPDASH_HOST and EXPO_PUBLIC_APPDASH_KEY to send events.');
+  console.warn('[appmetry demo] Set EXPO_PUBLIC_APPMETRY_HOST and EXPO_PUBLIC_APPMETRY_KEY to send events.');
 }
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -53,12 +53,12 @@ function RootLayoutNav() {
   const colorScheme = useColorScheme();
 
   return (
-    <AppdashProvider>
+    <AppmetryProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         </Stack>
       </ThemeProvider>
-    </AppdashProvider>
+    </AppmetryProvider>
   );
 }

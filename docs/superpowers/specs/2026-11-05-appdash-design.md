@@ -1,3 +1,5 @@
+> Note: the product was renamed from appdash to Appmetry after this document was written.
+
 # appdash — design spec (MVP)
 
 Date: 2026-11-05 · Status: draft for review · Working name: **appdash** (rename freely)

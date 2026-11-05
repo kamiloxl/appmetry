@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import AppdashAttributionModule from './AppdashAttributionModule';
+import AppmetryAttributionModule from './AppmetryAttributionModule';
 
 const toMs = (seconds: unknown): number | undefined => {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return undefined;
@@ -7,14 +7,14 @@ const toMs = (seconds: unknown): number | undefined => {
   return ms > 0 ? ms : undefined;
 };
 
-type Deps = { module: typeof AppdashAttributionModule; os: string };
+type Deps = { module: typeof AppmetryAttributionModule; os: string };
 
 /**
  * Install-time attribution inputs: Apple AdServices token (iOS) or Play Install
  * Referrer (Android). Keys without a value are omitted. Never throws.
  */
 export async function collectInstallProps(
-  deps: Deps = { module: AppdashAttributionModule, os: Platform.OS },
+  deps: Deps = { module: AppmetryAttributionModule, os: Platform.OS },
 ): Promise<Record<string, unknown>> {
   try {
     const mod = deps.module;

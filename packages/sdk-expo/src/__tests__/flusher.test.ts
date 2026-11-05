@@ -1,4 +1,4 @@
-import { LIMITS, type Batch, type BatchContext, type SdkEvent } from '@appdash/shared';
+import { LIMITS, type Batch, type BatchContext, type SdkEvent } from '@appmetry/shared';
 
 import { Flusher } from '../flusher';
 import { Queue } from '../queue';

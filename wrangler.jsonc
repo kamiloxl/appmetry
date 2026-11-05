@@ -1,7 +1,7 @@
 {
   // The repository root is the deployable unit, so the Deploy to Cloudflare button works (spec §2 "Deployment").
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "appdash",
+  "name": "appmetry",
   "main": "apps/server/src/index.ts",
   "compatibility_date": "2026-11-05",
   "observability": { "enabled": true },
@@ -15,9 +15,9 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "appdash",
+      "database_name": "appmetry",
       // Placeholder: the Deploy to Cloudflare button provisions a database and replaces this id.
-      // Deploying by hand? Run `npx wrangler d1 create appdash` and paste the id here.
+      // Deploying by hand? Run `npx wrangler d1 create appmetry` and paste the id here.
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "apps/server/migrations"
     }

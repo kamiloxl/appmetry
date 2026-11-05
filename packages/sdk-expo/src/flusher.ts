@@ -1,4 +1,4 @@
-import { LIMITS, type Batch, type BatchContext, type SdkEvent } from '@appdash/shared';
+import { LIMITS, type Batch, type BatchContext, type SdkEvent } from '@appmetry/shared';
 
 import { log } from './log';
 import type { Queue } from './queue';

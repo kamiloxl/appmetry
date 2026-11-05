@@ -5,44 +5,44 @@ export const PRIVACY_SENTENCE = "Do not send email or name in identify() unless 
 
 export function installSnippet(host: string, appKey: string): string {
   return `# 1. Install
-npx expo install @appdash/expo
-# (pnpm add @appdash/expo works too; use a development build for install attribution, Expo Go works without it)
+npx expo install appmetry
+# (pnpm add appmetry works too; use a development build for install attribution, Expo Go works without it)
 
 // 2. app/_layout.tsx
-import { Appdash, AppdashProvider } from '@appdash/expo';
+import { Appmetry, AppmetryProvider } from 'appmetry';
 import Purchases from 'react-native-purchases';
 import { Slot } from 'expo-router';
 import { useEffect } from 'react';
 
-Appdash.init({ appKey: '${appKey}', host: '${host}' });
+Appmetry.init({ appKey: '${appKey}', host: '${host}' });
 
 export default function RootLayout() {
   // 3. RevenueCat (optional): configure, then sync before the first paywall
   useEffect(() => {
     (async () => {
       Purchases.configure({ apiKey: '<your RevenueCat public key>' });
-      await Appdash.syncRevenueCat(Purchases);
+      await Appmetry.syncRevenueCat(Purchases);
       // ...show your first paywall after this line
     })();
   }, []);
 
   return (
-    <AppdashProvider>
+    <AppmetryProvider>
       <Slot />
-    </AppdashProvider>
+    </AppmetryProvider>
   );
 }
 `;
 }
 
 export function aiPrompt(host: string, appKey: string): string {
-  return `Add appdash analytics to this Expo (React Native) project.
+  return `Add appmetry analytics to this Expo (React Native) project.
 
-1. Install the SDK: run \`npx expo install @appdash/expo\`.
-2. In the root layout (for example app/_layout.tsx), import \`Appdash\` and \`AppdashProvider\` from '@appdash/expo' and call \`Appdash.init({ appKey: '${appKey}', host: '${host}' })\` once at module level, outside any component.
-3. Wrap the app's root component tree in \`<AppdashProvider>\`.
-4. If the project uses react-native-purchases (RevenueCat), call \`await Appdash.syncRevenueCat(Purchases)\` right after \`Purchases.configure(...)\` and before the first paywall is shown. Skip this step otherwise.
-5. Optionally, once the user signs in, call \`Appdash.identify({ userId })\` with an opaque user id from the app's own backend.
+1. Install the SDK: run \`npx expo install appmetry\`.
+2. In the root layout (for example app/_layout.tsx), import \`Appmetry\` and \`AppmetryProvider\` from 'appmetry' and call \`Appmetry.init({ appKey: '${appKey}', host: '${host}' })\` once at module level, outside any component.
+3. Wrap the app's root component tree in \`<AppmetryProvider>\`.
+4. If the project uses react-native-purchases (RevenueCat), call \`await Appmetry.syncRevenueCat(Purchases)\` right after \`Purchases.configure(...)\` and before the first paywall is shown. Skip this step otherwise.
+5. Optionally, once the user signs in, call \`Appmetry.identify({ userId })\` with an opaque user id from the app's own backend.
 
 Note: install attribution (Play Install Referrer and Apple Search Ads) needs a development build (\`npx expo run:android\` / \`npx expo run:ios\` or an EAS development build). Expo Go works for everything else.
 
@@ -50,7 +50,7 @@ ${PRIVACY_SENTENCE}
 `;
 }
 
-const WARNING_FIX = 'Call Appdash.syncRevenueCat(Purchases) on every app start';
+const WARNING_FIX = 'Call Appmetry.syncRevenueCat(Purchases) on every app start';
 
 function ago(ms: number): string {
   const m = Math.floor(Math.max(0, ms) / 60_000);
@@ -68,6 +68,6 @@ export function healthLabel(h: RcHealth, now: number = Date.now()): { text: stri
   const share = Math.round((h.withInstallId24h / h.events24h) * 100);
   const matched = Math.round((h.matched24h / h.events24h) * 100);
   const when = h.lastEventAt >= now ? 'just now' : ago(now - h.lastEventAt);
-  const base = `Last event ${when} · ${share}% carry appdash_install_id · ${matched}% matched`;
+  const base = `Last event ${when} · ${share}% carry appmetry_install_id · ${matched}% matched`;
   return { text: h.warning ? `${base}. ${WARNING_FIX}` : base, warning: h.warning };
 }

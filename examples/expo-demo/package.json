@@ -1,5 +1,5 @@
 {
-  "name": "@appdash/expo-demo",
+  "name": "@appmetry/expo-demo",
   "version": "1.0.0",
   "private": true,
   "main": "expo-router/entry",
@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@appdash/expo": "workspace:*",
+    "appmetry": "workspace:*",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~58.0.23",
     "expo-application": "~58.1.2",

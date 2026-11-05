@@ -1,4 +1,4 @@
-import type { BatchContext, Platform as SdkPlatform } from '@appdash/shared';
+import type { BatchContext, Platform as SdkPlatform } from '@appmetry/shared';
 import * as Application from 'expo-application';
 import * as Device from 'expo-device';
 import * as Localization from 'expo-localization';

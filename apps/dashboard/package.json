@@ -1,5 +1,5 @@
 {
-  "name": "@appdash/dashboard",
+  "name": "@appmetry/dashboard",
   "version": "0.1.0",
   "private": true,
   "license": "FSL-1.1-MIT",
@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@appdash/shared": "workspace:*",
+    "@appmetry/shared": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.1",

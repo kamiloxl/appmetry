@@ -5,7 +5,7 @@ import worker from '../src/index';
 import { forgetSessionKey, purgeLoginFailures, sessionKey } from '../src/auth';
 import type { Env } from '../src/env';
 
-const BASE = 'https://appdash.example.workers.dev';
+const BASE = 'https://appmetry.example.workers.dev';
 let ipCounter = 0;
 
 /** Each test logs in from its own IP so the lockout counter never leaks between tests. */
@@ -155,7 +155,7 @@ describe('password login', () => {
     expect(res.headers.get('set-cookie')).toBeNull();
     const body = await res.json<{ error: string }>();
     expect(body.error).toBe(
-      'Set a stronger ADMIN_PASSWORD (at least 12 characters) in Cloudflare → Workers → appdash → Settings → Variables',
+      'Set a stronger ADMIN_PASSWORD (at least 12 characters) in Cloudflare → Workers → appmetry → Settings → Variables',
     );
   });
 

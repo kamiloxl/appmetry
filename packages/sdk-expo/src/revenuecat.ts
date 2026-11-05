@@ -1,10 +1,10 @@
-import type { AttributionResponse } from '@appdash/shared';
+import type { AttributionResponse } from '@appmetry/shared';
 
 import { log } from './log';
 
 /**
  * The subset of the `react-native-purchases` default export (checked against v11.0.1, where all of these
- * are static methods) that appdash uses. Pass `Purchases` itself.
+ * are static methods) that appmetry uses. Pass `Purchases` itself.
  */
 export interface RevenueCatLike {
   setAttributes(a: Record<string, string | null>): unknown;
@@ -48,7 +48,7 @@ async function safe(what: string, fn: () => unknown): Promise<void> {
 
 /** Writes the install id into the RevenueCat customer. Never throws. */
 export async function applyInstallId(p: RevenueCatLike, iid: string): Promise<void> {
-  await safe('setAttributes', () => p.setAttributes({ appdash_install_id: iid }));
+  await safe('setAttributes', () => p.setAttributes({ appmetry_install_id: iid }));
 }
 
 /** Sets the non-null attribution attributes, then syncs so Targeting sees them. Never throws. */

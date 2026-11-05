@@ -13,9 +13,9 @@ const AUTH_DAYS = 30;
 const SUBJECT = 'admin';
 
 export const PASSWORD_MISSING_HINT =
-  'Set ADMIN_PASSWORD (at least 12 characters) in Cloudflare → Workers → appdash → Settings → Variables. For local development, copy .dev.vars.example to .dev.vars.';
+  'Set ADMIN_PASSWORD (at least 12 characters) in Cloudflare → Workers → appmetry → Settings → Variables. For local development, copy .dev.vars.example to .dev.vars.';
 export const PASSWORD_WEAK_HINT =
-  'Set a stronger ADMIN_PASSWORD (at least 12 characters) in Cloudflare → Workers → appdash → Settings → Variables';
+  'Set a stronger ADMIN_PASSWORD (at least 12 characters) in Cloudflare → Workers → appmetry → Settings → Variables';
 
 let cachedKey: Promise<string> | null = null;
 

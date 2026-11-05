@@ -1,7 +1,7 @@
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
-  /** Dashboard login password, at least 12 characters (Cloudflare → Workers → appdash → Settings → Variables). */
+  /** Dashboard login password, at least 12 characters (Cloudflare → Workers → appmetry → Settings → Variables). */
   ADMIN_PASSWORD: string;
   /** Optional key for signing the login cookie. When unset, a random key is generated once and kept in `meta`. */
   SESSION_SECRET?: string;

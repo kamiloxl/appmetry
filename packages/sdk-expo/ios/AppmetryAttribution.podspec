@@ -3,19 +3,19 @@ require 'json'
 package = JSON.parse(File.read(File.join(__dir__, '..', 'package.json')))
 
 Pod::Spec.new do |s|
-  s.name           = 'AppdashAttribution'
+  s.name           = 'AppmetryAttribution'
   s.version        = package['version']
   s.summary        = package['description']
   s.description    = package['description']
   s.license        = package['license']
   # CocoaPods requires an author; package.json has none, so fall back to the project name.
-  s.author         = package['author'] || 'appdash contributors'
+  s.author         = package['author'] || 'appmetry contributors'
   s.homepage       = package['homepage']
   s.platforms      = {
     :ios => '16.4'
   }
   s.swift_version  = '5.9'
-  s.source         = { git: 'https://github.com/appdash/appdash' }
+  s.source         = { git: 'https://github.com/kamiloxl/appmetry' }
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'

@@ -1,8 +1,8 @@
-# appdash
+# appmetry
 
-appdash is a source-available, self-hosted, revenue-first analytics product for Expo apps. It shows which acquisition sources and in-app behaviour actually drive revenue. It runs on your own free Cloudflare account (Workers + D1), with a React dashboard and an Expo SDK (`@appdash/expo`). No central appdash server exists and no telemetry is sent to the appdash project.
+appmetry is a source-available, self-hosted, revenue-first analytics product for Expo apps. It shows which acquisition sources and in-app behaviour actually drive revenue. It runs on your own free Cloudflare account (Workers + D1), with a React dashboard and an Expo SDK (`appmetry`). No central appmetry server exists and no telemetry is sent to the appmetry project.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/kamiloxl/appdash)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/kamiloxl/appmetry)
 
 > The Deploy button creates the D1 database in Cloudflare's automatic location, which cannot be pinned to the EU. If your users are in the UK/EU, read [Data location](#data-location) before you click it.
 
@@ -19,7 +19,7 @@ appdash is a source-available, self-hosted, revenue-first analytics product for 
 2. Choose names for the Worker, the repository and the D1 database (the defaults are fine).
 3. Enter `ADMIN_PASSWORD` (at least 12 characters). You use it to log in.
 4. Wait for the build. Cloudflare pre-fills the build and deploy commands from `package.json`. Keep the deploy command `pnpm run deploy` if Cloudflare shows it: it applies the D1 migrations and then deploys. D1 itself is provisioned from `wrangler.jsonc`.
-5. Open the `https://appdash.<your-subdomain>.workers.dev` URL, log in and follow the setup wizard. It takes you to a verified first event and a verified RevenueCat webhook.
+5. Open the `https://appmetry.<your-subdomain>.workers.dev` URL, log in and follow the setup wizard. It takes you to a verified first event and a verified RevenueCat webhook.
 
 Screenshots of the Cloudflare screens are not included yet.
 
@@ -34,7 +34,7 @@ Requires Node 22.12 or newer and pnpm.
 ```sh
 pnpm install
 npx wrangler login
-npx wrangler d1 create appdash --location weur     # or: --jurisdiction eu (see Data location)
+npx wrangler d1 create appmetry --location weur     # or: --jurisdiction eu (see Data location)
 # paste the printed database_id into wrangler.jsonc (d1_databases[0].database_id)
 npx wrangler secret put ADMIN_PASSWORD             # at least 12 characters
 pnpm run build
@@ -52,7 +52,7 @@ If you must keep data in the EU/UK, use one of these instead:
 - **Manual path** above with `--jurisdiction eu` (use it for EU data residency). `--location weur` is only a location hint, not a guarantee.
 - **Your own fork with Workers Builds** (instead of the one-click button):
   1. Fork the repo on GitHub.
-  2. Create the D1 with `npx wrangler d1 create appdash --jurisdiction eu`.
+  2. Create the D1 with `npx wrangler d1 create appmetry --jurisdiction eu`.
   3. Edit `database_id` in the fork's `wrangler.jsonc` and commit.
   4. In Cloudflare go to Workers & Pages → Create → Import a repository and pick the fork.
   5. Set the deploy command to `pnpm run deploy` and add the `ADMIN_PASSWORD` variable/secret.
@@ -62,14 +62,14 @@ Cloudflare's [Data Processing Addendum](https://www.cloudflare.com/cloudflare-cu
 ## Add the SDK
 
 ```sh
-npx expo install @appdash/expo @react-native-async-storage/async-storage expo-application expo-crypto expo-device expo-linking expo-localization
+npx expo install appmetry @react-native-async-storage/async-storage expo-application expo-crypto expo-device expo-linking expo-localization
 ```
 
 ```tsx
-import { Appdash, AppdashProvider } from '@appdash/expo';
+import { Appmetry, AppmetryProvider } from 'appmetry';
 
-Appdash.init({ appKey: 'app_xxx', host: 'https://appdash.you.workers.dev' });
-// wrap your root layout in <AppdashProvider> for automatic screen tracking with Expo Router
+Appmetry.init({ appKey: 'app_xxx', host: 'https://appmetry.you.workers.dev' });
+// wrap your root layout in <AppmetryProvider> for automatic screen tracking with Expo Router
 ```
 
 The wizard shows a ready-made snippet and an AI prompt for your app. Full SDK reference: [packages/sdk-expo/README.md](packages/sdk-expo/README.md). A working app is in [examples/expo-demo](examples/expo-demo).
@@ -86,15 +86,15 @@ Create links in the dashboard (**Links**). `/l/<slug>` records a click, then red
 
 1. In the dashboard open your app's settings (or wizard step 3) and generate a webhook secret. It is shown once and stored hashed.
 2. In RevenueCat go to **Project settings → Integrations → Webhooks**. Paste the webhook URL and paste the secret as the **Authorization header** value. Click **Send test event**; the wizard turns green.
-3. In your app, call `Appdash.syncRevenueCat(Purchases)` **after** `Purchases.configure`, inside an async function, and before the first paywall loads.
+3. In your app, call `Appmetry.syncRevenueCat(Purchases)` **after** `Purchases.configure`, inside an async function, and before the first paywall loads.
 
 Notes:
 
 - Confirm your RevenueCat plan includes webhooks.
-- Use **one RevenueCat project per appdash app**: RevenueCat event ids are globally unique and are used for de-duplication.
-- `syncRevenueCat` sets the `appdash_install_id` subscriber attribute and RevenueCat's attribution attributes (`$mediaSource`, `$campaign`, `$adGroup`, `$ad`, `$keyword`), so RevenueCat Charts, customer filters and paywall Targeting can segment by appdash source and campaign.
+- Use **one RevenueCat project per appmetry app**: RevenueCat event ids are globally unique and are used for de-duplication.
+- `syncRevenueCat` sets the `appmetry_install_id` subscriber attribute and RevenueCat's attribution attributes (`$mediaSource`, `$campaign`, `$adGroup`, `$ad`, `$keyword`), so RevenueCat Charts, customer filters and paywall Targeting can segment by appmetry source and campaign.
 - Lifecycle events appear in the Events panel and customer timeline: `rc_trial_started`, `rc_intro_started`, `rc_subscription_started`, `rc_trial_converted`, `rc_subscription_renewed`, `rc_in_app_purchase`, `rc_refunded`, `rc_subscription_cancelled`, `rc_subscription_uncancelled`, `rc_billing_issue`, `rc_subscription_expired`, `rc_product_changed`.
-- **Health check**: app settings show the last event, event count, and the share of the last 24 h of production events that carry `appdash_install_id` or matched an install. Below 50% a warning appears, usually because `syncRevenueCat` is not called on every app start, or an old app version is in use.
+- **Health check**: app settings show the last event, event count, and the share of the last 24 h of production events that carry `appmetry_install_id` or matched an install. Below 50% a warning appears, usually because `syncRevenueCat` is not called on every app start, or an old app version is in use.
 - Sandbox purchases are stored but hidden unless you enable the sandbox toggle.
 - After an `optOut`, RevenueCat attributes stay on the RevenueCat customer. If you need them removed, do that in RevenueCat.
 
@@ -106,8 +106,8 @@ No setup. On iOS the SDK reads an AdServices token on first launch and the serve
 
 This section is a starting point, not legal advice.
 
-- **You are the controller.** The person who deploys an instance decides why and how the data is used. appdash is only the tool.
-- **Consent (UK GDPR / PECR).** Storing or reading data on the device may need consent. Use `Appdash.init({ requireConsent: true })`: nothing is stored or sent until `Appdash.optIn()`, and `Appdash.optOut()` stops collection and clears the queue on the device. It does not delete data already sent to the server; use Settings → Delete user data for that.
+- **You are the controller.** The person who deploys an instance decides why and how the data is used. appmetry is only the tool.
+- **Consent (UK GDPR / PECR).** Storing or reading data on the device may need consent. Use `Appmetry.init({ requireConsent: true })`: nothing is stored or sent until `Appmetry.optIn()`, and `Appmetry.optOut()` stops collection and clears the queue on the device. It does not delete data already sent to the server; use Settings → Delete user data for that.
 - **What is collected.** A random install id (not IDFA/GAID); device model, OS version, app version, language and timezone; country, region and city derived from the request (the IP is not stored); sessions, screens and custom events; campaign and source details from tracked links, the Play install referrer and Apple Search Ads; RevenueCat purchase events linked to the install id; and, if you call `identify`, a user id and optionally email and name. Private URL parameters (`email`, `token`, `code`, ...) are stripped before anything is stored. The setup wizard (step 6) offers a privacy-policy paragraph that lists this; it is generated in [apps/dashboard/src/lib/setup.ts](apps/dashboard/src/lib/setup.ts).
 - **Personal data.** `app_user_id` (RevenueCat) and `identify` email/name are personal data. Send an opaque `userId` rather than an email or name. The erase endpoint takes the id in the query string (`DELETE /api/apps/:id/users`), so avoid emails as ids: they would land in request logs.
 - **Retention.** Per-app `retention_months`, default 25. An hourly job (each app at most once per 23 h) deletes events, sessions and link clicks older than the cutoff. It then deletes installs whose last activity is older than the cutoff and that have no session left. For those installs, link clicks are detached, and their payments lose install id, `app_user_id` and session id and get `matched_by = erased`, and their RevenueCat delivery logs lose install id and `app_user_id`, but the rows stay. Payments are never deleted by retention. RevenueCat delivery logs are deleted after 30 days.
@@ -121,7 +121,7 @@ This section is a starting point, not legal advice.
 - The `ratelimits` binding in `wrangler.jsonc` uses `namespace_id` `"1001"`. It must be unique within your Cloudflare account. If another Worker already uses it, change it to another positive integer string.
 - `ADMIN_PASSWORD` must be at least 12 characters, otherwise login is refused. Login locks out an IP after 10 failures in 15 minutes.
 - The app key is public (as in every client-side analytics tool), so anyone can send fake events; limits, size caps and an optional bundle-id check mitigate it.
-- No telemetry is sent to the appdash project.
+- No telemetry is sent to the appmetry project.
 
 ## Free plan limits
 
@@ -165,14 +165,14 @@ Maintainer checklist:
 
 ## Releasing the SDK
 
-Only `@appdash/expo` is published (`@appdash/shared` is bundled into it and private). Add an npm automation token as the repository secret `NPM_TOKEN`, then push a tag such as `sdk-v0.1.0`. The workflow in `.github/workflows/release-sdk.yml` checks that the tag matches the SDK version in `packages/sdk-expo/package.json`, then builds and publishes with provenance.
+Only `appmetry` is published (`@appmetry/shared` is bundled into it and private). Add an npm automation token as the repository secret `NPM_TOKEN`, then push a tag such as `sdk-v0.1.0`. The workflow in `.github/workflows/release-sdk.yml` checks that the tag matches the SDK version in `packages/sdk-expo/package.json`, then builds and publishes with provenance.
 
 ## License
 
-appdash is licensed under the [Functional Source License, Version 1.1, MIT Future License](LICENSE) (FSL-1.1-MIT). It is source-available, not OSI open source.
+appmetry is licensed under the [Functional Source License, Version 1.1, MIT Future License](LICENSE) (FSL-1.1-MIT). It is source-available, not OSI open source.
 
 - **You may** use, copy, modify and redistribute it for any purpose other than a Competing Use. That includes running it to measure your own apps, including commercial apps, plus internal use, non-commercial education and research, and professional services for a licensee.
-- **You may not**, without a commercial license, make it available to others in a commercial product or service that substitutes for appdash or offers substantially similar functionality (for example selling it, or a hosted appdash-like analytics service).
+- **You may not**, without a commercial license, make it available to others in a commercial product or service that substitutes for appmetry or offers substantially similar functionality (for example selling it, or a hosted appmetry-like analytics service).
 - **Each version becomes MIT** two years after its release.
 
 For a commercial license, open an issue or contact the maintainer. Portions adapted from Datadash remain under the MIT License; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). This summary is not legal advice; the [LICENSE](LICENSE) text governs.

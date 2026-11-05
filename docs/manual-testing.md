@@ -13,21 +13,21 @@ Each item has steps and expected results. Tick an item only when every expected 
 2. Log in and create an app, either in the dashboard or with the API:
 
    ```sh
-   curl -s -c /tmp/appdash.cookies -X POST http://localhost:8787/api/auth/login \
+   curl -s -c /tmp/appmetry.cookies -X POST http://localhost:8787/api/auth/login \
      -H 'content-type: application/json' -d '{"password":"change-me-please"}'
-   curl -s -b /tmp/appdash.cookies -X POST http://localhost:8787/api/apps \
+   curl -s -b /tmp/appmetry.cookies -X POST http://localhost:8787/api/apps \
      -H 'content-type: application/json' -d '{"name":"Expo demo"}'
    ```
 
    Keep `id` (the app id) and `app_key` from the response. Leave the bundle ids empty, or set both to
-   `dev.appdash.demo`: a different value makes ingest answer `403 bundle_id_mismatch`.
+   `dev.appmetry.demo`: a different value makes ingest answer `403 bundle_id_mismatch`.
 3. Point the demo at it and install dependencies:
 
    ```sh
    pnpm install
    cd examples/expo-demo
-   export EXPO_PUBLIC_APPDASH_HOST=http://localhost:8787   # Android emulator: http://10.0.2.2:8787
-   export EXPO_PUBLIC_APPDASH_KEY=app_...
+   export EXPO_PUBLIC_APPMETRY_HOST=http://localhost:8787   # Android emulator: http://10.0.2.2:8787
+   export EXPO_PUBLIC_APPMETRY_KEY=app_...
    ```
 
 4. Read results with the same cookie:
@@ -38,7 +38,7 @@ Each item has steps and expected results. Tick an item only when every expected 
    The install id is shown on the demo's Home tab, and the Paywall tab's "Fake purchase" button logs it.
 
 For a device or store build, the server must be reachable from the phone: deploy it (`pnpm run deploy`)
-or expose `wrangler dev` through a tunnel, and use that URL as `EXPO_PUBLIC_APPDASH_HOST`.
+or expose `wrangler dev` through a tunnel, and use that URL as `EXPO_PUBLIC_APPMETRY_HOST`.
 
 ---
 
@@ -55,8 +55,8 @@ Steps:
 5. Read the overview and the install timeline.
 
 Expected:
-- The build succeeds, which proves the Swift `AppdashAttribution` module compiles and autolinks.
-- Metro logs `[appdash]` debug lines and no red box.
+- The build succeeds, which proves the Swift `AppmetryAttribution` module compiles and autolinks.
+- Metro logs `[appmetry]` debug lines and no red box.
 - Overview: `current.installs` = 1 and `current.sessions` ≥ 1.
 - Timeline: one `install` entry, a `session` entry with a duration (the duration comes from the `ping`
   sent on backgrounding), `screen` entries for `/` and `/paywall`, and events `paywall_shown` and
@@ -72,15 +72,15 @@ Android Studio before the first release.
 
 Steps:
 1. `npx expo prebuild --platform android --clean`.
-2. Compile the Kotlin `AppdashAttribution` module (Install Referrer) on its own first, so a Kotlin error is
+2. Compile the Kotlin `AppmetryAttribution` module (Install Referrer) on its own first, so a Kotlin error is
    not buried in the app build:
 
    ```sh
-   cd android && ./gradlew :appdash_expo:compileDebugKotlin
+   cd android && ./gradlew :appmetry:compileDebugKotlin
    ```
 
    If the Gradle project name differs, list it with `./gradlew projects`.
-3. Set `EXPO_PUBLIC_APPDASH_HOST=http://10.0.2.2:8787` (the emulator's alias for the host machine's
+3. Set `EXPO_PUBLIC_APPMETRY_HOST=http://10.0.2.2:8787` (the emulator's alias for the host machine's
    `localhost`), then `npx expo run:android`.
 4. Repeat steps 3 to 5 of item 1 (background with the Home button).
 
@@ -96,9 +96,9 @@ Expected:
 
 Steps:
 1. Build a release AAB of an app using the SDK (for example the demo with `android.package` changed to
-   your Play package) with `EXPO_PUBLIC_APPDASH_HOST` set to the deployed server, and upload it to the
+   your Play package) with `EXPO_PUBLIC_APPMETRY_HOST` set to the deployed server, and upload it to the
    Play Console internal testing track. Add your Google account as a tester.
-2. In appdash, set the app's Play Store URL (`PATCH /api/apps/<id>` with `play_store_url`) and create a
+2. In appmetry, set the app's Play Store URL (`PATCH /api/apps/<id>` with `play_store_url`) and create a
    tracked link: `POST /api/apps/<id>/links` with `{"slug":"demo-play","utm_source":"newsletter","utm_campaign":"launch"}`.
 3. Uninstall the app from the test phone. Open `https://<server>/l/demo-play` on the phone.
 4. Install from the Play page the link opens (the internal testing opt-in link must be accepted first),
@@ -114,7 +114,7 @@ Expected:
 ## 4. Real iOS device build (not yet verified)
 
 Steps:
-1. Enable Developer Mode on the iPhone. Set `EXPO_PUBLIC_APPDASH_HOST` to a URL the phone can reach.
+1. Enable Developer Mode on the iPhone. Set `EXPO_PUBLIC_APPMETRY_HOST` to a URL the phone can reach.
 2. `npx expo run:ios --device` and choose the phone (a free or paid signing team is enough).
 3. Open the app once, then background it.
 
@@ -159,17 +159,17 @@ Expected:
 
 Steps:
 1. In a test app (not the demo, which has no purchase SDK), add `react-native-purchases`, configure it
-   with the RevenueCat public SDK key, then call `await Appdash.syncRevenueCat(Purchases)` after
+   with the RevenueCat public SDK key, then call `await Appmetry.syncRevenueCat(Purchases)` after
    `Purchases.configure(...)`.
-2. In appdash, create the webhook secret: `POST /api/apps/<id>/rc-secret`. In RevenueCat, add a webhook
+2. In appmetry, create the webhook secret: `POST /api/apps/<id>/rc-secret`. In RevenueCat, add a webhook
    to `https://<server>/api/webhooks/revenuecat/<id>` with that secret as the Authorization header.
-   Turn on "show sandbox" for the app in appdash so sandbox revenue is counted.
+   Turn on "show sandbox" for the app in appmetry so sandbox revenue is counted.
 3. Make a sandbox purchase on a device (App Store sandbox account or Play license tester).
 
 Expected:
-- The RevenueCat customer page shows the attribute `appdash_install_id` equal to the app's install id,
+- The RevenueCat customer page shows the attribute `appmetry_install_id` equal to the app's install id,
   and `$mediaSource` equal to the install's source (plus `$campaign` etc. when the install has them).
-- appdash receives the webhook (`INITIAL_PURCHASE`, environment `SANDBOX`), and the payment is matched to
+- appmetry receives the webhook (`INITIAL_PURCHASE`, environment `SANDBOX`), and the payment is matched to
   the install with `matched_by` = `attribute`.
 - The install timeline shows the payment and the `rc_*` lifecycle event.
 - RevenueCat health shows every event carrying the install id (100%) and no warning. Note that health

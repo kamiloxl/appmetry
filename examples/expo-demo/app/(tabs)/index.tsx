@@ -1,4 +1,4 @@
-import { Appdash } from '@appdash/expo';
+import { Appmetry } from 'appmetry';
 import { useEffect, useState } from 'react';
 import { Button, StyleSheet } from 'react-native';
 
@@ -8,17 +8,17 @@ export default function HomeScreen() {
   const [iid, setIid] = useState<string | null>(null);
 
   useEffect(() => {
-    void Appdash.installId().then(setIid);
+    void Appmetry.installId().then(setIid);
   }, []);
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>appdash demo</Text>
+      <Text style={styles.title}>appmetry demo</Text>
       <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
       <Text style={styles.mono}>install id: {iid ?? '(not yet)'}</Text>
       <View style={styles.buttons}>
-        <Button title="Track button_tapped" onPress={() => Appdash.track('button_tapped', { screen: 'home' })} />
-        <Button title="Flush now" onPress={() => void Appdash.flush()} />
+        <Button title="Track button_tapped" onPress={() => Appmetry.track('button_tapped', { screen: 'home' })} />
+        <Button title="Flush now" onPress={() => void Appmetry.flush()} />
       </View>
     </View>
   );

@@ -4,9 +4,9 @@ import AdServices
 #endif
 
 // Install attribution inputs: Apple AdServices token (no ATT consent required).
-public class AppdashAttributionModule: Module {
+public class AppmetryAttributionModule: Module {
   public func definition() -> ModuleDefinition {
-    Name("AppdashAttribution")
+    Name("AppmetryAttribution")
 
     // Returns a Base64 token (24 h TTL) or nil when unavailable (e.g. simulator).
     AsyncFunction("getAdServicesToken") { () -> String? in

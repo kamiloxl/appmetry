@@ -10,6 +10,6 @@ if (!existsSync(index)) {
   mkdirSync(dist, { recursive: true });
   writeFileSync(
     index,
-    '<!doctype html><meta charset="utf-8"><title>appdash</title><p>The dashboard has not been built yet. Run <code>pnpm run build</code>.</p>\n',
+    '<!doctype html><meta charset="utf-8"><title>appmetry</title><p>The dashboard has not been built yet. Run <code>pnpm run build</code>.</p>\n',
   );
 }

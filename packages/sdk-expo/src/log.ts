@@ -1,6 +1,6 @@
 let debug = false;
 
-/** Turns SDK debug logging on or off. Wired to `Appdash.init({ debug })`. */
+/** Turns SDK debug logging on or off. Wired to `Appmetry.init({ debug })`. */
 export function setDebug(on: boolean): void {
   debug = on === true;
 }
@@ -9,7 +9,7 @@ export function setDebug(on: boolean): void {
 export function log(...args: unknown[]): void {
   if (!debug) return;
   try {
-    console.log('[appdash]', ...args);
+    console.log('[appmetry]', ...args);
   } catch {
     // console unavailable: ignore
   }

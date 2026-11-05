@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
 import type { Env } from '../src/env';
 
-const BASE = 'https://appdash.example.workers.dev';
+const BASE = 'https://appmetry.example.workers.dev';
 
 async function call(path: string, init: RequestInit = {}, bindings: Partial<Env> = {}, base = BASE) {
   const headers = new Headers(init.headers);

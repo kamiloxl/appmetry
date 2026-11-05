@@ -1,4 +1,4 @@
-import { friendlyName } from '@appdash/shared';
+import { friendlyName } from '@appmetry/shared';
 import type { StatsCtx } from './filters';
 
 export interface Customer {

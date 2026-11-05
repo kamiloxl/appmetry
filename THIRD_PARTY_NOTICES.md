@@ -1,8 +1,8 @@
 # Third-party notices
 
-appdash is licensed under the Functional Source License, Version 1.1, MIT Future License (see `LICENSE`).
+appmetry is licensed under the Functional Source License, Version 1.1, MIT Future License (see `LICENSE`).
 
-Parts of appdash were adapted from **Datadash**, which is distributed under the MIT License. As that license
+Parts of appmetry were adapted from **Datadash**, which is distributed under the MIT License. As that license
 requires, its copyright and permission notice is reproduced below. It applies to the adapted portions, including
 `apps/server/src/lib/crypto.ts`, `apps/server/src/lib/time.ts`, `packages/shared/src/names.ts`,
 `packages/shared/src/sources.ts`, the dashboard components in `apps/dashboard/src/components/`

@@ -1,6 +1,6 @@
-import type { Batch, SdkEvent } from '@appdash/shared';
+import type { Batch, SdkEvent } from '@appmetry/shared';
 
-import { createAppdash } from '../client';
+import { createAppmetry } from '../client';
 import type { KV } from '../storage';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
@@ -71,7 +71,7 @@ function setup(opts: { os?: string; state?: string; kv?: MemoryKV; status?: numb
   });
   let n = 0;
   let clock = 1_700_000_000_000;
-  const api = createAppdash({
+  const api = createAppmetry({
     store: kv,
     appState,
     fetchFn: fetchFn as unknown as typeof fetch,
@@ -87,7 +87,7 @@ function setup(opts: { os?: string; state?: string; kv?: MemoryKV; status?: numb
 const init = { appKey: 'app_test', host: 'https://x.example' };
 const types = (evs: SdkEvent[]) => evs.map((e) => e.type);
 
-describe('Appdash client', () => {
+describe('Appmetry client', () => {
   it('init enqueues install once ever and session_start', async () => {
     const kv = new MemoryKV();
     const a = setup({ kv });
@@ -95,9 +95,9 @@ describe('Appdash client', () => {
     await settle();
     await a.api.flush();
     expect(types(a.sent())).toEqual(['install', 'session_start']);
-    expect(kv.map.get('appdash:installed')).toBe('1');
+    expect(kv.map.get('appmetry:installed')).toBe('1');
     expect(a.bodies[0].context.platform).toBe('ios');
-    expect(a.bodies[0].context.iid).toBe(kv.map.get('appdash:iid'));
+    expect(a.bodies[0].context.iid).toBe(kv.map.get('appmetry:iid'));
 
     const b = setup({ kv });
     b.api.init(init);
@@ -183,22 +183,22 @@ describe('Appdash client', () => {
 
     a.api.optIn();
     await a.api.flush();
-    expect(a.kv.map.get('appdash:consent')).toBe('granted');
-    expect(a.kv.map.get('appdash:iid')).toBeTruthy();
+    expect(a.kv.map.get('appmetry:consent')).toBe('granted');
+    expect(a.kv.map.get('appmetry:iid')).toBeTruthy();
     expect(types(a.sent())).toEqual(['install', 'session_start']);
   });
 
   it('stored denied behaves like no consent whatever requireConsent says', async () => {
     const kv = new MemoryKV();
-    kv.map.set('appdash:consent', 'denied');
+    kv.map.set('appmetry:consent', 'denied');
     const a = setup({ kv });
     a.api.init(init);
     a.api.track('x');
     await settle();
     await a.api.flush();
     expect(a.fetchFn).not.toHaveBeenCalled();
-    expect(kv.map.has('appdash:iid')).toBe(false);
-    expect(kv.map.has('appdash:queue')).toBe(false);
+    expect(kv.map.has('appmetry:iid')).toBe(false);
+    expect(kv.map.has('appmetry:queue')).toBe(false);
   });
 
   it('optOut clears queue, stops flushing and persists denied', async () => {
@@ -206,7 +206,7 @@ describe('Appdash client', () => {
     a.api.init(init);
     await settle();
     expect(await a.api.installId()).toBeTruthy();
-    expect(kv(a).map.get('appdash:queue')).toBeTruthy();
+    expect(kv(a).map.get('appmetry:queue')).toBeTruthy();
     a.api.optOut();
     await settle();
     a.fetchFn.mockClear();
@@ -214,10 +214,10 @@ describe('Appdash client', () => {
     a.appState.emit('background');
     await a.api.flush();
     expect(a.fetchFn).not.toHaveBeenCalled();
-    expect(a.kv.map.get('appdash:consent')).toBe('denied');
-    expect(a.kv.map.has('appdash:queue')).toBe(false);
-    expect(a.kv.map.has('appdash:iid')).toBe(false);
-    expect(a.kv.map.has('appdash:installed')).toBe(false);
+    expect(a.kv.map.get('appmetry:consent')).toBe('denied');
+    expect(a.kv.map.has('appmetry:queue')).toBe(false);
+    expect(a.kv.map.has('appmetry:iid')).toBe(false);
+    expect(a.kv.map.has('appmetry:installed')).toBe(false);
     expect(await a.api.installId()).toBeNull();
   });
 
@@ -254,7 +254,7 @@ describe('Appdash client', () => {
 
   it('installId returns persisted id', async () => {
     const kv = new MemoryKV();
-    kv.map.set('appdash:iid', 'persisted-iid-1234');
+    kv.map.set('appmetry:iid', 'persisted-iid-1234');
     const a = setup({ kv });
     a.api.init(init);
     expect(await a.api.installId()).toBe('persisted-iid-1234');
@@ -307,11 +307,11 @@ describe('opt-out semantics', () => {
     a.appState.emit('background');
     await settle();
     await a.api.flush();
-    const denied = a.kv.log.indexOf('set appdash:consent=denied');
+    const denied = a.kv.log.indexOf('set appmetry:consent=denied');
     expect(denied).toBeGreaterThanOrEqual(0);
-    expect(a.kv.log.slice(denied + 1).filter((l) => !l.startsWith('set appdash:consent=denied'))).toEqual([]);
-    expect(a.kv.map.has('appdash:queue')).toBe(false);
-    expect(a.kv.map.has('appdash:iid')).toBe(false);
+    expect(a.kv.log.slice(denied + 1).filter((l) => !l.startsWith('set appmetry:consent=denied'))).toEqual([]);
+    expect(a.kv.map.has('appmetry:queue')).toBe(false);
+    expect(a.kv.map.has('appmetry:iid')).toBe(false);
     expect(a.fetchFn).toHaveBeenCalledTimes(1);
   });
 
@@ -322,7 +322,7 @@ describe('opt-out semantics', () => {
     await settle();
     await a.api.flush();
     expect(a.fetchFn).not.toHaveBeenCalled();
-    expect([...a.kv.map.entries()]).toEqual([['appdash:consent', 'denied']]);
+    expect([...a.kv.map.entries()]).toEqual([['appmetry:consent', 'denied']]);
   });
 
   it('track during a hanging flush is queued without waiting', async () => {
@@ -331,7 +331,7 @@ describe('opt-out semantics', () => {
     await settle();
     a.api.track('during');
     await settle();
-    const queued = JSON.parse(a.kv.map.get('appdash:queue') ?? '[]') as SdkEvent[];
+    const queued = JSON.parse(a.kv.map.get('appmetry:queue') ?? '[]') as SdkEvent[];
     expect(queued.map((e) => e.name ?? e.type)).toContain('during');
   });
 
@@ -353,11 +353,11 @@ describe('opt-out semantics', () => {
     a.api.optOut();
     a.api.optIn();
     await settle();
-    expect(a.kv.map.get('appdash:consent')).toBe('granted');
+    expect(a.kv.map.get('appmetry:consent')).toBe('granted');
     expect(a.fetchFn.mock.calls.length).toBe(2);
     const second = a.signals.length;
     expect(second).toBe(2);
-    expect(JSON.parse(a.kv.map.get('appdash:queue') ?? '[]').map((e: SdkEvent) => e.type)).toEqual(['install', 'session_start']);
+    expect(JSON.parse(a.kv.map.get('appmetry:queue') ?? '[]').map((e: SdkEvent) => e.type)).toEqual(['install', 'session_start']);
   });
 
   it('optIn after init+optOut delivers', async () => {

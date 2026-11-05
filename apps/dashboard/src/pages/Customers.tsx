@@ -69,7 +69,7 @@ export function Customers() {
         <div className="card p-10 text-center">
           <h2 className="text-lg font-semibold">No paying customers in this range</h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-stone-500">
-            Customers appear once RevenueCat sends purchases to appdash. Add the RevenueCat webhook in Settings, then widen the range or clear the filters.
+            Customers appear once RevenueCat sends purchases to appmetry. Add the RevenueCat webhook in Settings, then widen the range or clear the filters.
           </p>
           <Link className="btn-dark mt-5" to={`/apps/${id}/settings`}>
             Open Settings

@@ -1,4 +1,4 @@
-import { extractTouch, LIMITS, stripPrivateParams, type BatchContext, type EventType, type SdkEvent } from '@appdash/shared';
+import { extractTouch, LIMITS, stripPrivateParams, type BatchContext, type EventType, type SdkEvent } from '@appmetry/shared';
 import { randomUUID } from 'expo-crypto';
 import { AppState } from 'react-native';
 
@@ -15,7 +15,7 @@ import { createStore, type KV } from './storage';
 import { Transport } from './transport';
 import { version as SDK_VERSION } from '../package.json';
 
-export interface AppdashOptions {
+export interface AppmetryOptions {
   appKey: string;
   host: string;
   /** When true, nothing is stored or sent until `optIn()` is called. */
@@ -25,8 +25,8 @@ export interface AppdashOptions {
   debug?: boolean;
 }
 
-export interface AppdashApi {
-  init(o: AppdashOptions): void;
+export interface AppmetryApi {
+  init(o: AppmetryOptions): void;
   track(name: string, props?: Record<string, unknown>): void;
   screen(name: string): void;
   identify(p: { userId?: string; email?: string; name?: string }): void;
@@ -36,20 +36,20 @@ export interface AppdashApi {
   installId(): Promise<string | null>;
   flush(): Promise<void>;
   /**
-   * Writes the appdash install id into the RevenueCat customer and sets its attribution attributes from the
+   * Writes the appmetry install id into the RevenueCat customer and sets its attribution attributes from the
    * install's resolved source. Pass the `Purchases` default export. Never throws.
    */
   syncRevenueCat(purchases: RevenueCatLike, o?: { waitMs?: number }): Promise<void>;
 }
 
 /** Internal surface: not part of the documented public API. */
-export interface AppdashInternal extends AppdashApi {
+export interface AppmetryInternal extends AppmetryApi {
   deepLink(url: string): void;
 }
 
-const KEY_IID = 'appdash:iid';
-const KEY_CONSENT = 'appdash:consent';
-const KEY_INSTALLED = 'appdash:installed';
+const KEY_IID = 'appmetry:iid';
+const KEY_CONSENT = 'appmetry:consent';
+const KEY_INSTALLED = 'appmetry:installed';
 const DEFAULT_ATTRIBUTION_WAIT_MS = 3000;
 const DEFAULT_SESSION_TIMEOUT_MS = 5 * 60_000;
 const MAX_NAME = 255;
@@ -59,7 +59,7 @@ const MAX_USER_ID = 200;
 const MAX_PROPS_CHARS = 1024;
 
 /** Test seams. Production code uses the defaults. */
-export interface AppdashDeps {
+export interface AppmetryDeps {
   store?: KV;
   appState?: {
     currentState: string;
@@ -84,7 +84,7 @@ const clean = (v: unknown, max: number): string | undefined => {
   return t === '' ? undefined : t;
 };
 
-export function createAppdash(deps: AppdashDeps = {}): AppdashInternal {
+export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
   const now = deps.now ?? Date.now;
   const newId = deps.newId ?? randomUUID;
 
@@ -93,7 +93,7 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashInternal {
   /** Tasks run one after another, so calls made during async setup are replayed in order. */
   let chain: Promise<unknown> | null = null;
 
-  let opts: AppdashOptions;
+  let opts: AppmetryOptions;
   let store: KV;
   let queue: Queue;
   let flusher: Flusher;
@@ -114,7 +114,7 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashInternal {
   let lastPurchases: RevenueCatLike | null = null;
   let awaitingAttribution = false;
 
-  const appState = () => deps.appState ?? (AppState as unknown as NonNullable<AppdashDeps['appState']>);
+  const appState = () => deps.appState ?? (AppState as unknown as NonNullable<AppmetryDeps['appState']>);
 
   function run<T>(task: (gen: number) => Promise<T> | T): Promise<T | undefined> {
     if (!chain) return Promise.resolve(undefined);
@@ -232,7 +232,7 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashInternal {
     else log('no consent: collection is off');
   }
 
-  const api: AppdashInternal = {
+  const api: AppmetryInternal = {
     init(o) {
       try {
         if (initialized) {
@@ -424,4 +424,4 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashInternal {
 }
 
 /** The app-wide instance. */
-export const Appdash: AppdashApi = createAppdash();
+export const Appmetry: AppmetryApi = createAppmetry();

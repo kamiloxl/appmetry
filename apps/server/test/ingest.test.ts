@@ -1,7 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { beforeAll, describe, expect, it } from 'vitest';
-import type { SdkEvent } from '@appdash/shared';
+import type { SdkEvent } from '@appmetry/shared';
 import worker from '../src/index';
 import type { AppRow, Env } from '../src/env';
 import { ingestBatch } from '../src/ingest';

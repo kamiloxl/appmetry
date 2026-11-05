@@ -3,7 +3,7 @@ import { env } from 'cloudflare:workers';
 import worker from '../src/index';
 import type { AppRow, Env } from '../src/env';
 
-export const BASE = 'https://appdash.example.workers.dev';
+export const BASE = 'https://appmetry.example.workers.dev';
 let ipCounter = 0;
 
 /** Call the worker in-process. `cookie` is a `name=value` header value. */

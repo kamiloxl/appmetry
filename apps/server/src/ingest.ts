@@ -13,7 +13,7 @@ import {
   type Batch,
   type InstallAttribution,
   type SdkEvent,
-} from '@appdash/shared';
+} from '@appmetry/shared';
 import { sanitizeInstallProps, makeOnInstall } from './attribution';
 import { getAppByKey, type AppEnv, type AppRow } from './env';
 
