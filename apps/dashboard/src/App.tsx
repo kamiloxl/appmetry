@@ -2,13 +2,16 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Logo } from './components/Logo';
 import { api } from './lib/api';
-import type { AppInfo, Me } from './lib/types';
+import type { AppInfo, Me, SetupStatus } from './lib/types';
 import { Apps } from './pages/Apps';
 import { Customers } from './pages/Customers';
 import { Links } from './pages/Links';
 import { Login } from './pages/Login';
 import { Overview } from './pages/Overview';
 import { Settings } from './pages/Settings';
+import { Setup } from './pages/Setup';
+import { progressCount, SETUP_STEPS } from './lib/setup';
+import { useApi } from './lib/useApi';
 
 /** Waits for /api/auth/me, then renders the shell. Anyone not logged in goes to /login and comes back after. */
 function RequireAuth() {
@@ -57,6 +60,12 @@ const TABS = [
 /** Frame of every /apps/:id page: the app's name and its sections. The pages themselves arrive in later tasks. */
 function AppLayout() {
   const { id } = useParams();
+  const location = useLocation();
+  const onSetupPage = location.pathname.endsWith('/setup');
+  // Re-read on every navigation inside the app, so the banner is gone right after the wizard finishes.
+  const [navTick, setNavTick] = useState(0);
+  useEffect(() => setNavTick((n) => n + 1), [location.pathname]);
+  const setup = useApi<SetupStatus>(id && !onSetupPage ? `/api/apps/${id}/setup` : null, navTick);
   const [app, setApp] = useState<AppInfo | null | undefined>(undefined);
   useEffect(() => {
     api<AppInfo[]>('/api/apps')
@@ -88,27 +97,20 @@ function AppLayout() {
           ))}
         </nav>
       </div>
+      {!onSetupPage && !setup.loading && setup.data && setup.data.current !== null && (
+        <Link
+          to={`/apps/${app.id}/setup`}
+          className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 hover:bg-amber-100"
+        >
+          <span>Finish setup ({progressCount(setup.data)}/{SETUP_STEPS.length})</span>
+          <span aria-hidden="true">→</span>
+        </Link>
+      )}
       <div className="mt-6">
         <Outlet />
       </div>
     </div>
   );
-}
-
-function ComingSoon({ title, back }: { title: string; back: { to: string; label: string } }) {
-  return (
-    <div className="card p-10 text-center">
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <Link className="btn mt-5" to={back.to}>
-        {back.label}
-      </Link>
-    </div>
-  );
-}
-
-function Back({ title }: { title: string }) {
-  const { id } = useParams();
-  return <ComingSoon title={title} back={{ to: `/apps/${id}`, label: 'Back to overview' }} />;
 }
 
 export function App() {
@@ -117,14 +119,13 @@ export function App() {
       <Route path="/login" element={<Login />} />
       <Route element={<RequireAuth />}>
         <Route path="/" element={<Apps />} />
-        {/* Instance setup wizard (spec 6a), built in Task 25. */}
-        <Route path="/setup" element={<ComingSoon title="Setup wizard coming soon" back={{ to: '/', label: 'Back to your apps' }} />} />
+        <Route path="/setup" element={<Setup />} />
         <Route path="/apps/:id" element={<AppLayout />}>
           <Route index element={<Overview />} />
           <Route path="customers" element={<Customers />} />
           <Route path="links" element={<Links />} />
           <Route path="settings" element={<Settings />} />
-          <Route path="setup" element={<Back title="Setup wizard coming soon" />} />
+          <Route path="setup" element={<Setup />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

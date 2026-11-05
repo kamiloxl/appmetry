@@ -11,21 +11,27 @@ npx expo install @appdash/expo
 // 2. app/_layout.tsx
 import { Appdash, AppdashProvider } from '@appdash/expo';
 import Purchases from 'react-native-purchases';
+import { Slot } from 'expo-router';
+import { useEffect } from 'react';
 
 Appdash.init({ appKey: '${appKey}', host: '${host}' });
 
 export default function RootLayout() {
+  // 3. RevenueCat (optional): configure, then sync before the first paywall
+  useEffect(() => {
+    (async () => {
+      Purchases.configure({ apiKey: '<your RevenueCat public key>' });
+      await Appdash.syncRevenueCat(Purchases);
+      // ...show your first paywall after this line
+    })();
+  }, []);
+
   return (
     <AppdashProvider>
       <Slot />
     </AppdashProvider>
   );
 }
-
-// 3. RevenueCat (optional): after Purchases.configure, before the first paywall
-Purchases.configure({ apiKey: '<your RevenueCat public key>' });
-await Appdash.syncRevenueCat(Purchases);
-// ...show your first paywall after this line
 `;
 }
 

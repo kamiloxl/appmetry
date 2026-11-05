@@ -28,6 +28,7 @@ import { runDaily } from './cron';
 import { notFound, onError, securityHeaders } from './errors';
 import { privacyRoutes } from './privacy';
 import { handleRevenueCat, revenuecatRoutes } from './revenuecat';
+import { setupRoutes } from './setup';
 
 const app = new Hono<AppEnv>();
 
@@ -94,6 +95,7 @@ app.route('/', appsRoutes);
 app.route('/', linksRoutes);
 app.route('/', revenuecatRoutes);
 app.route('/', privacyRoutes);
+app.route('/', setupRoutes);
 
 // ---------- stats (read side of the Overview page)
 

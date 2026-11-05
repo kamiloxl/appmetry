@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { Modal } from '../components/Modal';
 import { api } from '../lib/api';
 import { dateLabel } from '../lib/format';
@@ -15,6 +15,9 @@ export function Apps() {
       .then(setApps)
       .catch((e: Error) => setError(e.message));
   }, []);
+
+  // First run: nothing to show yet, so start the setup wizard.
+  if (apps && apps.length === 0) return <Navigate to="/setup" replace />;
 
   return (
     <div>

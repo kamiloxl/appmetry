@@ -131,3 +131,20 @@ export interface RcSecret {
 export interface EraseResult {
   installs: number;
 }
+
+/** Wizard steps in order. Mirrors apps/server/src/setup.ts (R4: no server imports in the browser bundle). */
+export type SetupStep = 'app' | 'firstEvent' | 'revenuecatWebhook' | 'revenuecatSync' | 'attribution' | 'privacy';
+
+/** One wizard step as GET /api/apps/:id/setup reports it. `at` is epoch ms; `detail` is e.g. "iPhone16,1, ios 18.1". */
+export interface StepStatus {
+  done: boolean;
+  skipped?: boolean;
+  at?: number;
+  detail?: string;
+}
+
+/** GET/PATCH /api/apps/:id/setup. `current` is the first step neither done nor skipped; null means setup is complete. */
+export interface SetupStatus {
+  steps: Record<SetupStep, StepStatus>;
+  current: SetupStep | null;
+}

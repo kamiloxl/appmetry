@@ -52,7 +52,7 @@ function CopyButton({ text, onCopied, label = 'Copy' }: { text: string; onCopied
 }
 
 /** Create / edit form. `link` set means edit; the slug then starts as the saved one and is never auto-filled. */
-function LinkForm({ appId, link, onSaved, onCancel }: { appId: string; link?: TrackedLink; onSaved: (l: TrackedLink) => void; onCancel?: () => void }) {
+export function LinkForm({ appId, link, onSaved, onCancel }: { appId: string; link?: TrackedLink; onSaved: (l: TrackedLink) => void; onCancel?: () => void }) {
   const [f, setF] = useState<FormState>(
     link
       ? {

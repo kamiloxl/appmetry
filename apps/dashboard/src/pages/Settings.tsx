@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useState, type FormEvent } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Modal } from '../components/Modal';
+import { CopyButton, Field, Section } from '../components/ui';
 import { api } from '../lib/api';
 import { aiPrompt, healthLabel, installSnippet } from '../lib/snippets';
-import type { AppInfo, EraseResult, RcHealth, RcSecret } from '../lib/types';
+import { SETUP_STEPS, STEP_TITLES, progressLabel } from '../lib/setup';
+import type { AppInfo, EraseResult, RcHealth, SetupStatus, SetupStep } from '../lib/types';
 import { useApi } from '../lib/useApi';
+import { useRcSecret } from '../lib/useRcSecret';
 
 const COMMON_ZONES = [
   'UTC', 'Europe/London', 'Europe/Dublin', 'Europe/Paris', 'Europe/Berlin', 'Europe/Madrid', 'Europe/Warsaw', 'Europe/Athens',
@@ -12,49 +15,6 @@ const COMMON_ZONES = [
   'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Seoul',
   'Australia/Sydney', 'Pacific/Auckland', 'Africa/Johannesburg', 'Africa/Lagos',
 ];
-
-/** Copy to clipboard; falls back to a prompt when the Clipboard API is unavailable (plain http, old browsers). */
-function CopyButton({ text, label = 'Copy', onCopied }: { text: string; label?: string; onCopied?: () => void }) {
-  const [done, setDone] = useState(false);
-  const timer = useRef<number>();
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      window.prompt('Copy this text', text);
-    }
-    setDone(true);
-    onCopied?.();
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setDone(false), 1500);
-  }
-  return (
-    <button type="button" className="btn px-2.5 py-1 text-xs" onClick={copy}>
-      {done ? 'Copied' : label}
-    </button>
-  );
-}
-
-function Section({ title, description, children }: { title: string; description?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="card p-5">
-      <h2 className="text-base font-semibold">{title}</h2>
-      {description && <p className="mt-1 text-sm text-stone-500">{description}</p>}
-      <div className="mt-4 space-y-4">{children}</div>
-    </section>
-  );
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <label className="block text-sm">
-      <span className="mb-1 block text-xs font-medium text-stone-500">{label}</span>
-      {children}
-      {hint && <span className="mt-1 block text-xs text-stone-400">{hint}</span>}
-    </label>
-  );
-}
 
 type Patch = Partial<Pick<AppInfo, 'ios_bundle_id' | 'android_package' | 'app_store_url' | 'play_store_url' | 'web_url' | 'timezone' | 'retention_months'>> & { show_sandbox?: boolean };
 
@@ -169,25 +129,13 @@ function RevenueCatSection({ app, onSecretSet }: { app: AppInfo; onSecretSet: ()
   const [reloadKey, setReloadKey] = useState(0);
   const health = useApi<RcHealth>(`/api/apps/${app.id}/revenuecat/health`, reloadKey);
   const [confirmRotate, setConfirmRotate] = useState(false);
-  const [secret, setSecret] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+  const { secret, setSecret, busy, error, generate: gen } = useRcSecret(app.id, () => {
+    onSecretSet();
+    setReloadKey((k) => k + 1);
+  });
   async function generate() {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await api<RcSecret>(`/api/apps/${app.id}/rc-secret`, { method: 'POST' });
-      setConfirmRotate(false);
-      setSecret(r.secret);
-      onSecretSet();
-      setReloadKey((k) => k + 1);
-    } catch (e) {
-      setConfirmRotate(false);
-      setError(e instanceof Error ? e.message : 'failed');
-    } finally {
-      setBusy(false);
-    }
+    await gen();
+    setConfirmRotate(false);
   }
 
   const label = health.data ? healthLabel(health.data) : null;
@@ -393,7 +341,7 @@ function EraseSection({ app }: { app: AppInfo }) {
       )}
       <Modal open={confirm} onClose={() => setConfirm(false)} title="Delete this user's data?" width="max-w-md">
         <p className="text-sm text-stone-600">
-          This permanently removes the install (or every install with this user id), its sessions, events and link-click links. Payment amounts are kept, without identity. This cannot be undone.
+          This permanently deletes the install (or every install with this user id), its sessions and its events. Link clicks are kept but detached from the install. Payments and RevenueCat events keep their amounts but lose their identity (install id and app user id). This cannot be undone.
         </p>
         <p className="mt-2 text-sm">
           <span className="text-stone-500">{by}:</span> <code className="break-all">{id}</code>
@@ -463,6 +411,75 @@ function DangerSection({ app }: { app: AppInfo }) {
   );
 }
 
+const STEP_HINT: Record<SetupStep, string> = {
+  app: 'App created',
+  firstEvent: 'Waiting for the first event from the SDK',
+  revenuecatWebhook: 'Waiting for a RevenueCat event',
+  revenuecatSync: 'waiting for first purchase',
+  attribution: 'Not confirmed yet',
+  privacy: 'Not confirmed yet',
+};
+
+function SetupChecklist({ app }: { app: AppInfo }) {
+  const [reload, setReload] = useState(0);
+  const setup = useApi<SetupStatus>(`/api/apps/${app.id}/setup`, reload);
+  const [error, setError] = useState<string | null>(null);
+  async function reset(step: SetupStep) {
+    setError(null);
+    try {
+      setup.setData(await api<SetupStatus>(`/api/apps/${app.id}/setup`, { method: 'PATCH', json: { step, state: 'reset' } }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'failed');
+      setReload((k) => k + 1);
+    }
+  }
+  const s = setup.data;
+  return (
+    <Section
+      title={s ? progressLabel(s) : 'Setup'}
+      description="Everything the first-run wizard covers. Reset a step to see it again."
+    >
+      {setup.error && (
+        <p role="alert" className="text-sm text-red-600">
+          Could not load setup: {setup.error}
+        </p>
+      )}
+      {s && (
+        <ul className="divide-y divide-stone-100" aria-label="Setup checklist">
+          {SETUP_STEPS.map((k) => {
+            const st = s.steps[k];
+            const state = st.done ? 'done' : st.skipped ? 'skipped' : 'pending';
+            return (
+              <li key={k} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm" data-state={state}>
+                <span className="flex items-center gap-2">
+                  <span className={state === 'done' ? 'text-emerald-600' : 'text-stone-400'} aria-hidden="true">
+                    {state === 'done' ? '✓' : state === 'skipped' ? '–' : '○'}
+                  </span>
+                  <span className="font-medium">{STEP_TITLES[k]}</span>
+                  <span className="text-stone-500">{state === 'done' ? st.detail ?? 'Done' : state === 'skipped' ? 'skipped' : STEP_HINT[k]}</span>
+                </span>
+                {k !== 'app' && (
+                  <button className="btn px-2.5 py-1 text-xs" onClick={() => void reset(k)} aria-label={`Reset ${STEP_TITLES[k]}`}>
+                    Reset
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-red-600">
+          Could not reset: {error}
+        </p>
+      )}
+      <Link className="btn-dark" to={`/apps/${app.id}/setup`}>
+        Open setup wizard
+      </Link>
+    </Section>
+  );
+}
+
 export function Settings() {
   const { id = '' } = useParams();
   const apps = useApi<AppInfo[]>('/api/apps');
@@ -480,6 +497,7 @@ export function Settings() {
   const replace = (a: AppInfo) => apps.setData((all) => (all ? all.map((x) => (x.id === a.id ? a : x)) : all));
   return (
     <div className="space-y-4">
+      <SetupChecklist app={app} />
       <InstallSection app={app} />
       <StoresSection app={app} onSaved={replace} />
       <RevenueCatSection app={app} onSecretSet={() => replace({ ...app, has_rc_secret: true })} />

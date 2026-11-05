@@ -14,6 +14,14 @@ describe('installSnippet', () => {
     expect(s).toContain('<AppdashProvider>');
     expect(s.indexOf('await Appdash.syncRevenueCat(Purchases)')).toBeGreaterThan(s.indexOf('Purchases.configure'));
   });
+  it('has no top-level await: the sync call sits inside an async function', () => {
+    const line = s.split('\n').find((l) => l.includes('await Appdash.syncRevenueCat'));
+    expect(line).toBeDefined();
+    expect(line!.startsWith(' ')).toBe(true);
+    expect(s).toContain('useEffect(');
+    expect(s.indexOf('async')).toBeLessThan(s.indexOf('await Appdash.syncRevenueCat'));
+    expect(s).not.toMatch(/^await /m);
+  });
   it('places syncRevenueCat before the first paywall', () => {
     expect(s.toLowerCase().lastIndexOf('paywall')).toBeGreaterThan(s.indexOf('syncRevenueCat'));
   });
