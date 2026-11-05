@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { QueryState } from '../lib/query';
+import { canShiftForward, shiftRange } from '../lib/shiftRange';
 
 export const RANGE_OPTIONS: { value: string; label: string }[] = [
   { value: 'today', label: 'Today' },
@@ -54,13 +55,24 @@ const itemCls = (active: boolean) =>
 
 /** Range, interval and refresh for the stats pages. State lives in the URL (see lib/query.ts). */
 export function Toolbar({ q, update, onRefresh, loading, left }: { q: QueryState; update: (p: Partial<QueryState>) => void; onRefresh: () => void; loading: boolean; left?: ReactNode }) {
-  const label = RANGE_OPTIONS.find((p) => p.value === q.range)?.label ?? (q.range === 'custom' ? 'Custom range' : 'Last 30 days');
+  const day = (t: number) => new Date(t).toLocaleDateString('en', { day: 'numeric', month: 'short' });
+  const label =
+    q.range === 'custom' && q.from !== undefined && q.to !== undefined
+      ? `${day(q.from)} → ${day(q.to - 1)}`
+      : (RANGE_OPTIONS.find((p) => p.value === q.range)?.label ?? (q.range === 'custom' ? 'Custom range' : 'Last 30 days'));
+  const now = Date.now();
+  const back = shiftRange(q, -1, now);
+  const forward = canShiftForward(q, now) ? shiftRange(q, 1, now) : null;
   return (
     <div className="flex flex-wrap items-center gap-2">
       {left}
+      <div className="flex h-11 items-stretch rounded-xl border border-stone-200 bg-white shadow-card">
+        <button className="rounded-l-xl px-3 text-xl text-stone-500 hover:bg-stone-50 disabled:opacity-30" onClick={() => back && update(back)} disabled={!back} aria-label="Previous period">
+          ‹
+        </button>
       <Dropdown
         button={
-          <button className="btn h-11 px-4 text-base">
+          <button className="flex h-full items-center gap-2 border-x border-stone-200 px-4 text-base font-medium hover:bg-stone-50">
             {label} <Chevron />
           </button>
         }
@@ -80,6 +92,10 @@ export function Toolbar({ q, update, onRefresh, loading, left }: { q: QueryState
           ))
         }
       </Dropdown>
+        <button className="rounded-r-xl px-3 text-xl text-stone-500 hover:bg-stone-50 disabled:opacity-30" onClick={() => forward && update(forward)} disabled={!forward} aria-label="Next period">
+          ›
+        </button>
+      </div>
       <Dropdown
         button={
           <button className="btn h-11 px-4 text-base">

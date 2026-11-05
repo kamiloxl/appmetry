@@ -24,3 +24,10 @@ describe('pctChange', () => {
     expect(pctChange(0, 0)).toBeNull();
   });
 });
+
+describe('pctChange sign', () => {
+  it('uses |prev| so a negative previous value does not flip the sign', () => {
+    expect(pctChange(50, -100)).toBe(1.5);
+    expect(pctChange(-150, -100)).toBe(-0.5);
+  });
+});

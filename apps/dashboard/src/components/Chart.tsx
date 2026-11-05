@@ -22,8 +22,8 @@ export function Chart({ series, stale = false }: { series: Overview['series'] | 
               tickLine={false}
               width={56}
               tickFormatter={(v: number) => moneyCompact(v)}
-              // Headroom keeps revenue bars in the lower part, under the installs line.
-              domain={[0, (max: number) => Math.max(1, Math.ceil(max * 1.6))]}
+              // Headroom keeps revenue bars in the lower part, under the installs line; the floor drops below 0 for refund bars.
+              domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(1, Math.ceil(max * 1.6))]}
             />
             <Tooltip formatter={(v, name) => (name === 'Revenue' ? money(Number(v)) : number(Number(v)))} />
             <Legend iconType="circle" />
