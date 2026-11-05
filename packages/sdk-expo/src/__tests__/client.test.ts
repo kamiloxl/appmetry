@@ -10,11 +10,13 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 class MemoryKV implements KV {
   map = new Map<string, string>();
   writes = 0;
+  log: string[] = [];
   async get(k: string) {
     return this.map.get(k) ?? null;
   }
   async set(k: string, v: string) {
     this.writes += 1;
+    this.log.push(`set ${k}=${v}`);
     this.map.set(k, v);
   }
   async remove(k: string) {
@@ -54,11 +56,16 @@ afterEach(async () => {
   }
 });
 
-function setup(opts: { os?: string; state?: string; kv?: MemoryKV; status?: number } = {}) {
+function setup(opts: { os?: string; state?: string; kv?: MemoryKV; status?: number; hang?: boolean } = {}) {
   const kv = opts.kv ?? new MemoryKV();
   const appState = fakeAppState(opts.state ?? 'active');
   const bodies: Batch[] = [];
+  const signals: AbortSignal[] = [];
   const fetchFn = jest.fn(async (_u: unknown, init?: RequestInit) => {
+    if (opts.hang) {
+      if (init?.signal) signals.push(init.signal);
+      return new Promise<Response>(() => {});
+    }
     bodies.push(JSON.parse(String(init?.body)));
     return { status: opts.status ?? 200 } as Response;
   });
@@ -74,7 +81,7 @@ function setup(opts: { os?: string; state?: string; kv?: MemoryKV; status?: numb
   });
   created.push(api);
   const sent = () => bodies.flatMap((b) => b.events);
-  return { api, kv, appState, fetchFn, bodies, sent, advance: (ms: number) => (clock += ms) };
+  return { api, kv, appState, fetchFn, bodies, signals, sent, advance: (ms: number) => (clock += ms) };
 }
 
 const init = { appKey: 'app_test', host: 'https://x.example' };
@@ -282,6 +289,84 @@ describe('Appdash client', () => {
     expect(evs[1].props).toBeUndefined();
     expect(evs[2]).toMatchObject({ name: 'bigprops' });
     expect(evs[2].props).toBeUndefined();
+  });
+});
+
+describe('opt-out semantics', () => {
+  it('optOut while a fetch hangs returns promptly, aborts it, drops later calls, writes nothing after denial', async () => {
+    const a = setup({ hang: true });
+    a.api.init(init);
+    await settle();
+    expect(a.fetchFn).toHaveBeenCalledTimes(1);
+    const t0 = Date.now();
+    a.api.optOut();
+    expect(Date.now() - t0).toBeLessThan(50);
+    expect(a.signals[0].aborted).toBe(true);
+    expect(a.appState.hasListener()).toBe(false);
+    a.api.track('after');
+    a.appState.emit('background');
+    await settle();
+    await a.api.flush();
+    const denied = a.kv.log.indexOf('set appdash:consent=denied');
+    expect(denied).toBeGreaterThanOrEqual(0);
+    expect(a.kv.log.slice(denied + 1).filter((l) => !l.startsWith('set appdash:consent=denied'))).toEqual([]);
+    expect(a.kv.map.has('appdash:queue')).toBe(false);
+    expect(a.kv.map.has('appdash:iid')).toBe(false);
+    expect(a.fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('init then optOut sends nothing and stores only consent=denied', async () => {
+    const a = setup();
+    a.api.init(init);
+    a.api.optOut();
+    await settle();
+    await a.api.flush();
+    expect(a.fetchFn).not.toHaveBeenCalled();
+    expect([...a.kv.map.entries()]).toEqual([['appdash:consent', 'denied']]);
+  });
+
+  it('track during a hanging flush is queued without waiting', async () => {
+    const a = setup({ hang: true });
+    a.api.init(init);
+    await settle();
+    a.api.track('during');
+    await settle();
+    const queued = JSON.parse(a.kv.map.get('appdash:queue') ?? '[]') as SdkEvent[];
+    expect(queued.map((e) => e.name ?? e.type)).toContain('during');
+  });
+
+  it('mutating props after track() does not change the queued event', async () => {
+    const a = setup();
+    a.api.init(init);
+    const props: Record<string, unknown> = { plan: 'pro' };
+    a.api.track('buy', props);
+    props.plan = 'free';
+    props.extra = 1;
+    await a.api.flush();
+    expect(a.sent().find((e) => e.name === 'buy')?.props).toEqual({ plan: 'pro' });
+  });
+
+  it('optIn after a hung-flush opt-out still delivers', async () => {
+    const a = setup({ hang: true });
+    a.api.init(init);
+    await settle();
+    a.api.optOut();
+    a.api.optIn();
+    await settle();
+    expect(a.kv.map.get('appdash:consent')).toBe('granted');
+    expect(a.fetchFn.mock.calls.length).toBe(2);
+    const second = a.signals.length;
+    expect(second).toBe(2);
+    expect(JSON.parse(a.kv.map.get('appdash:queue') ?? '[]').map((e: SdkEvent) => e.type)).toEqual(['install', 'session_start']);
+  });
+
+  it('optIn after init+optOut delivers', async () => {
+    const a = setup();
+    a.api.init(init);
+    a.api.optOut();
+    a.api.optIn();
+    await a.api.flush();
+    expect(types(a.sent())).toEqual(['install', 'session_start']);
   });
 });
 

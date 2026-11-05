@@ -39,6 +39,7 @@ export class Flusher {
   private retryTimer: Timer | null = null;
   private intervalTimer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
+  private epoch = 0; // bumped by stop(): a run started earlier must not ack or retry
 
   constructor(o: FlusherOptions) {
     this.queue = o.queue;
@@ -64,6 +65,9 @@ export class Flusher {
   stop(): void {
     try {
       this.stopped = true;
+      this.epoch += 1;
+      this.inflight = null;
+      this.transport.abort();
       if (this.intervalTimer) clearInterval(this.intervalTimer);
       this.intervalTimer = null;
       this.clearRetry();
@@ -83,6 +87,7 @@ export class Flusher {
 
   /** Sends until the queue is empty or the server asks to retry. Concurrent calls share one run. */
   flush(): Promise<void> {
+    if (this.stopped) return Promise.resolve();
     if (this.inflight) return this.inflight;
     const run = this.run()
       .catch((err: unknown) => log('flusher: flush failed', err))
@@ -99,7 +104,8 @@ export class Flusher {
   }
 
   private async run(): Promise<void> {
-    while (this.queue.size() > 0) {
+    const epoch = this.epoch;
+    while (this.queue.size() > 0 && epoch === this.epoch) {
       let events: SdkEvent[] = [];
       let result: SendResult;
       try {
@@ -110,6 +116,7 @@ export class Flusher {
         log('flusher: could not build or send batch', err);
         result = 'retry';
       }
+      if (epoch !== this.epoch) return; // stopped meanwhile: leave the queue alone
       if (result === 'retry') {
         this.scheduleRetry();
         return;

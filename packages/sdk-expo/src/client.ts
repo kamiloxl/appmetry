@@ -85,17 +85,22 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
   let platform: 'ios' | 'android';
 
   let enabled = false; // consent allows collection
+  /** Bumped by optOut(). Every task and activation step checks it and becomes a no-op if it changed. */
+  let generation = 0;
+  let cleanup: Promise<unknown> = Promise.resolve();
   let activated = false; // iid exists, flusher running, listener attached
   let iid: string | null = null;
   let subscription: { remove(): void } | null = null;
 
   const appState = () => deps.appState ?? (AppState as unknown as NonNullable<AppdashDeps['appState']>);
 
-  function run<T>(task: () => Promise<T> | T): Promise<T | undefined> {
+  function run<T>(task: (gen: number) => Promise<T> | T): Promise<T | undefined> {
     if (!chain) return Promise.resolve(undefined);
+    const gen = generation; // the generation at call time: an opt-out in between cancels the task
     const next = chain.then(async () => {
+      if (gen !== generation) return undefined;
       try {
-        return await task();
+        return await task(gen);
       } catch (err) {
         log('task failed', err);
         return undefined;
@@ -107,12 +112,14 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
 
   async function emit(type: EventType, ts: number, extra: { name?: string; props?: Record<string, unknown>; sid?: string } = {}) {
     if (!enabled || !activated) return;
+    const gen = generation;
     let sid = extra.sid ?? tracker.current();
     if (!sid) {
       // An event arrived before the app was ever foregrounded (headless start): open a session for it.
       const r = tracker.onActive(ts);
       sid = r.sid;
       if (r.started) await queueEvent({ id: newId(), type: 'session_start', ts, sid });
+      if (gen !== generation) return;
     }
     const e: SdkEvent = { id: newId(), type, ts, sid };
     if (extra.name !== undefined) e.name = extra.name;
@@ -121,6 +128,7 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
   }
 
   async function queueEvent(e: SdkEvent) {
+    if (!enabled) return;
     await queue.enqueue(e);
     flusher.notify();
   }
@@ -136,31 +144,38 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
         const r = tracker.onBackground(ts);
         if (r) {
           await emit('ping', ts, { sid: r.sid, props: { ms: r.foregroundMs } });
-          await flusher.flush();
+          void flusher.flush(); // fire and forget: never hold the task chain on the network
         }
       }
     });
   }
 
   /** Creates the install id, queues install (once ever) and session_start, starts flushing. */
-  async function activate() {
+  async function activate(gen: number) {
+    const alive = () => gen === generation && enabled;
     if (activated) return;
     await queue.load();
+    if (!alive()) return;
     let id = await store.get(KEY_IID);
+    if (!alive()) return;
     if (!id) {
       id = newId();
       await store.set(KEY_IID, id);
     }
+    if (!alive()) return;
     iid = id;
     activated = true;
     const ts = now();
-    if ((await store.get(KEY_INSTALLED)) !== '1') {
+    const installed = await store.get(KEY_INSTALLED);
+    if (!alive()) return;
+    if (installed !== '1') {
       let props: Record<string, unknown> = {};
       try {
         props = (await collectInstallProps()) ?? {};
       } catch (err) {
         log('collectInstallProps failed', err);
       }
+      if (!alive()) return;
       const e: SdkEvent = { id: newId(), type: 'install', ts, sid: tracker.current() ?? newId() };
       if (Object.keys(props).length > 0) e.props = props;
       // install belongs to the session that is about to start, so open it first.
@@ -172,21 +187,24 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
       } else {
         await queueEvent(e);
       }
+      if (!alive()) return;
       await store.set(KEY_INSTALLED, '1');
     } else if (appState().currentState === 'active') {
       const r = tracker.onActive(ts);
       if (r.started) await emit('session_start', ts, { sid: r.sid });
     }
+    if (!alive()) return;
     subscription?.remove();
     subscription = appState().addEventListener('change', onAppState);
     flusher.start();
-    await flusher.flush(); // start() alone would not retry a batch that failed before an opt-out
+    void flusher.flush(); // start() alone would not retry a batch that failed before an opt-out
   }
 
-  async function setup() {
+  async function setup(gen: number) {
     const stored = await store.get(KEY_CONSENT);
+    if (gen !== generation) return;
     enabled = stored === 'granted' || (stored !== 'denied' && !opts.requireConsent);
-    if (enabled) await activate();
+    if (enabled) await activate(gen);
     else log('no consent: collection is off');
   }
 
@@ -208,7 +226,7 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
         platform = p;
         opts = o;
         store = deps.store ?? createStore();
-        queue = new Queue(store);
+        queue = new Queue(store, 1000, () => enabled);
         tracker = new SessionTracker(o.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS, newId);
         const transport = new Transport({ host: o.host, appKey: o.appKey, fetchFn: deps.fetchFn });
         flusher = new Flusher({
@@ -229,21 +247,27 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
     },
 
     track(name, props) {
-      const ts = now();
-      void run(() => {
-        const n = clean(name, MAX_NAME);
-        if (!n) return;
+      try {
+        const ts = now();
+        // Snapshot now: the caller may mutate its object after this returns.
         let p: Record<string, unknown> | undefined;
         if (props !== undefined) {
           try {
-            if (isPlainObject(props) && JSON.stringify(props).length <= MAX_PROPS_CHARS) p = props;
+            const json = isPlainObject(props) ? JSON.stringify(props) : undefined;
+            if (json !== undefined && json.length <= MAX_PROPS_CHARS) p = JSON.parse(json) as Record<string, unknown>;
             else log('track: props dropped (not a plain object or over 1024 chars)');
           } catch {
             log('track: props dropped (not serializable)');
           }
         }
-        return emit('event', ts, { name: n, props: p });
-      });
+        void run(() => {
+          const n = clean(name, MAX_NAME);
+          if (!n) return;
+          return emit('event', ts, { name: n, props: p });
+        });
+      } catch (err) {
+        log('track failed', err);
+      }
     },
 
     screen(name) {
@@ -277,28 +301,39 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
     },
 
     optIn() {
-      void run(async () => {
+      void run(async (gen) => {
+        await cleanup; // a pending opt-out cleanup must finish before consent is granted again
+        if (gen !== generation) return;
         await store.set(KEY_CONSENT, 'granted');
+        if (gen !== generation) return;
         enabled = true;
-        await activate();
+        await activate(gen);
       });
     },
 
+    /** Takes effect synchronously; storage cleanup starts immediately, outside the task chain. */
     optOut() {
-      void run(async () => {
+      if (!initialized || disabled || !chain) return;
+      try {
         enabled = false;
         activated = false;
-        flusher.stop();
+        generation += 1;
+        flusher.stop(); // also aborts the request in flight and drops its result
         subscription?.remove();
         subscription = null;
-        await queue.clear();
-        await store.set(KEY_CONSENT, 'denied');
-        await store.remove(KEY_IID);
-        await store.remove(KEY_INSTALLED);
         iid = null;
         // Privacy reset: the next opt-in is a fresh install with a fresh session.
         tracker = new SessionTracker(opts.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS, newId);
-      });
+        // Issued back to back; the queue is cleared last and its writes are blocked while disabled.
+        cleanup = Promise.all([
+          store.set(KEY_CONSENT, 'denied'),
+          store.remove(KEY_IID),
+          store.remove(KEY_INSTALLED),
+          queue.clear(),
+        ]).catch((err: unknown) => log('optOut cleanup failed', err));
+      } catch (err) {
+        log('optOut failed', err);
+      }
     },
 
     async installId() {
@@ -307,7 +342,9 @@ export function createAppdash(deps: AppdashDeps = {}): AppdashApi {
     },
 
     async flush() {
-      await run(() => (enabled && activated ? flusher.flush() : undefined));
+      // Wait for earlier calls to be queued, then wait on the network outside the chain.
+      const f = await run(() => (enabled && activated ? flusher : null));
+      if (f) await f.flush();
     },
   };
 }

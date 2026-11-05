@@ -21,7 +21,9 @@ export class Queue {
 
   constructor(
     private readonly kv: KV,
-    private readonly cap = 1000
+    private readonly cap = 1000,
+    /** Writes to storage only happen while this returns true (false after opt-out). */
+    private readonly allowWrite: () => boolean = () => true
   ) {}
 
   /** Restores persisted events. Corrupt or unreadable data starts empty. Keeps events enqueued meanwhile. */
@@ -98,6 +100,7 @@ export class Queue {
   }
 
   private write(): Promise<void> {
+    if (!this.allowWrite()) return Promise.resolve();
     return this.kv.set(QUEUE_KEY, JSON.stringify(this.items));
   }
 

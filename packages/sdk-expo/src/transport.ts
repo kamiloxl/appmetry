@@ -16,6 +16,7 @@ export interface TransportOptions {
 export const REQUEST_TIMEOUT_MS = 30_000;
 
 const TIMED_OUT = Symbol('timeout');
+const ABORTED = Symbol('aborted');
 
 /** POSTs one batch to `<host>/api/v1/batch`. Never throws. */
 export class Transport {
@@ -23,6 +24,7 @@ export class Transport {
   private readonly appKey: string;
   private readonly fetchFn: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly aborters = new Set<() => void>();
 
   constructor(o: TransportOptions) {
     this.url = `${String(o.host).replace(/\/+$/, '')}/api/v1/batch`;
@@ -30,6 +32,17 @@ export class Transport {
     // Late-bound so tests and polyfills that replace global fetch are honoured.
     this.fetchFn = o.fetchFn ?? ((input, init) => fetch(input, init));
     this.timeoutMs = o.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  }
+
+  /** Cancels every request in flight; each resolves to `retry`. Later sends are unaffected. */
+  abort(): void {
+    for (const a of [...this.aborters]) {
+      try {
+        a();
+      } catch {
+        // ignore
+      }
+    }
   }
 
   async send(b: Batch): Promise<SendResult> {
@@ -41,6 +54,7 @@ export class Transport {
       return 'drop';
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let release = () => {};
     try {
       const controller = typeof AbortController === 'function' ? new AbortController() : undefined;
       // Race the timer too: React Native's fetch does not always honour the abort signal.
@@ -50,6 +64,14 @@ export class Transport {
           resolve(TIMED_OUT);
         }, this.timeoutMs);
       });
+      const aborted = new Promise<typeof ABORTED>((resolve) => {
+        const a = () => {
+          controller?.abort();
+          resolve(ABORTED);
+        };
+        this.aborters.add(a);
+        release = () => this.aborters.delete(a);
+      });
       const res = await Promise.race([
         this.fetchFn(this.url, {
           method: 'POST',
@@ -58,7 +80,9 @@ export class Transport {
           signal: controller?.signal,
         }),
         timeout,
+        aborted,
       ]);
+      if (res === ABORTED) return 'retry';
       if (res === TIMED_OUT) {
         log(`transport: no response after ${this.timeoutMs} ms, will retry`);
         return 'retry';
@@ -69,6 +93,7 @@ export class Transport {
       return 'retry';
     } finally {
       if (timer !== undefined) clearTimeout(timer);
+      release();
     }
   }
 }
