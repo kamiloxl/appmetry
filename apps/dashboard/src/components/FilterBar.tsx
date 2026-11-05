@@ -1,3 +1,5 @@
+import { ListFilter, X } from 'lucide-react';
+
 const DIM_LABELS: Record<string, string> = {
   channel: 'Channel',
   source: 'Source',
@@ -10,18 +12,29 @@ const DIM_LABELS: Record<string, string> = {
   device_model: 'Device',
 };
 
-/** Active filters as removable chips. Renders nothing when there are none. */
-export function FilterBar({ filters, onRemove }: { filters: Record<string, string>; onRemove: (dim: string) => void }) {
+/** Active filters as removable chips. With `hint`, an empty bar says how to add one; otherwise it renders nothing. */
+export function FilterBar({ filters, onRemove, hint }: { filters: Record<string, string>; onRemove: (dim: string) => void; hint?: string }) {
   const entries = Object.entries(filters);
-  if (entries.length === 0) return null;
+  if (entries.length === 0) {
+    return hint ? (
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <ListFilter className="size-4" aria-hidden="true" />
+        {hint}
+      </p>
+    ) : null;
+  }
   return (
     <div className="flex flex-wrap items-center gap-2" aria-label="Active filters">
       {entries.map(([dim, value]) => (
-        <span key={dim} className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-white py-1 pl-3 pr-1.5 text-sm shadow-card" data-testid={`chip-${dim}`}>
-          <span className="text-stone-500">{DIM_LABELS[dim] ?? dim}:</span>
+        <span key={dim} className="inline-flex h-8 items-center gap-1.5 rounded-lg border bg-card pl-2.5 pr-1 text-sm shadow-card" data-testid={`chip-${dim}`}>
+          <span className="text-muted-foreground">{DIM_LABELS[dim] ?? dim}</span>
           <span className="font-medium">{value}</span>
-          <button className="flex h-5 w-5 items-center justify-center rounded-full text-stone-400 hover:bg-stone-100 hover:text-ink" onClick={() => onRemove(dim)} aria-label={`Remove ${DIM_LABELS[dim] ?? dim} filter ${value}`}>
-            ×
+          <button
+            className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            onClick={() => onRemove(dim)}
+            aria-label={`Remove ${DIM_LABELS[dim] ?? dim} filter ${value}`}
+          >
+            <X className="size-3.5" />
           </button>
         </span>
       ))}

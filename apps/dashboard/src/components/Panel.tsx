@@ -46,7 +46,7 @@ function Skeleton() {
   return (
     <div className="space-y-1" aria-busy="true" aria-label="Loading">
       {[0, 1, 2, 3, 4].map((i) => (
-        <div key={i} className="h-10 animate-pulse rounded-lg bg-stone-100" style={{ width: `${100 - i * 12}%` }} />
+        <div key={i} className="h-10 animate-pulse rounded-lg bg-muted" style={{ width: `${100 - i * 12}%` }} />
       ))}
     </div>
   );
@@ -70,7 +70,7 @@ function PanelBody({ appId, q, tab, reloadKey, onPick }: { appId: string; q: Que
       </div>
     );
   if (!data) return <Skeleton />;
-  if (data.length === 0) return <p className="p-6 text-center text-sm text-stone-400">No data for this period</p>;
+  if (data.length === 0) return <p className="flex h-full min-h-[300px] items-center justify-center p-6 text-center text-sm text-muted-foreground">No data for this period</p>;
 
   return (
     <div className={`space-y-1 ${loading ? 'opacity-60' : ''}`}>
@@ -80,8 +80,8 @@ function PanelBody({ appId, q, tab, reloadKey, onPick }: { appId: string; q: Que
             <span className="absolute inset-0 flex">
               <span className="rounded-lg bg-installsSoft transition-all" style={{ width: `${(r.installs / max) * 100}%`, minWidth: r.installs ? 4 : 0 }} />
             </span>
-            <span className="relative flex min-w-0 flex-1 items-center gap-2.5 px-3 text-left text-[15px]">{renderLabel(tab.dim, r.value)}</span>
-            <span className="relative flex shrink-0 items-center gap-3 pr-3 text-[15px] font-medium">
+            <span className="relative flex min-w-0 flex-1 items-center gap-2.5 px-3 text-left text-sm">{renderLabel(tab.dim, r.value)}</span>
+            <span className="relative flex shrink-0 items-center gap-3 pr-3 text-sm font-medium">
               <span className="w-16 text-right text-sm font-normal text-revenue">{r.revenue !== 0 ? money(r.revenue) : ''}</span>
               <span className="w-10 text-right">{number(r.installs)}</span>
             </span>
@@ -92,7 +92,7 @@ function PanelBody({ appId, q, tab, reloadKey, onPick }: { appId: string; q: Que
           <button
             key={r.value}
             type="button"
-            className={`${cls} hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-stone-400 ${active === r.value ? 'ring-2 ring-stone-300' : ''}`}
+            className={`${cls} transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${active === r.value ? 'ring-2 ring-primary/30' : ''}`}
             aria-pressed={active === r.value}
             title={active === r.value ? `Remove filter ${r.value}` : `Filter by ${r.value}`}
             onClick={() => onPick?.(tab.dim, r.value)}
@@ -115,20 +115,20 @@ export function Panel({ appId, q, tabs, reloadKey = 0, onPick }: { appId: string
   const tab = tabs.find((t) => t.dim === active)!;
 
   return (
-    <div className="card flex min-h-[420px] flex-col p-3">
-      <div className="flex items-center justify-between gap-2 pb-3">
-        <div className="tabs overflow-x-auto" role="tablist">
+    <section className="card flex min-h-[440px] flex-col">
+      <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
+        <div className="tabs min-w-0 overflow-x-auto" role="tablist">
           {tabs.map((t) => (
             <button key={t.dim} role="tab" aria-selected={t.dim === active} className={`tab whitespace-nowrap ${t.dim === active ? 'tab-active' : ''}`} onClick={() => setActive(t.dim)}>
               {t.label}
             </button>
           ))}
         </div>
-        <span className="shrink-0 px-2 text-sm font-medium text-stone-600">Installs</span>
+        <span className="shrink-0 pr-1 text-xs font-medium text-muted-foreground">Installs</span>
       </div>
-      <div className="flex-1">
+      <div className="flex-1 p-2">
         <PanelBody key={tab.dim} appId={appId} q={q} tab={tab} reloadKey={reloadKey} onPick={onPick} />
       </div>
-    </div>
+    </section>
   );
 }

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Logo } from './components/Logo';
+import { Link, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { AppShell, useShell } from './components/AppShell';
 import { api } from './lib/api';
-import type { AppInfo, Me, SetupStatus } from './lib/types';
+import type { Me } from './lib/types';
 import { Apps } from './pages/Apps';
 import { Customers } from './pages/Customers';
 import { Links } from './pages/Links';
@@ -11,7 +11,6 @@ import { Overview } from './pages/Overview';
 import { Settings } from './pages/Settings';
 import { Setup } from './pages/Setup';
 import { progressCount, SETUP_STEPS } from './lib/setup';
-import { useApi } from './lib/useApi';
 
 /** Waits for /api/auth/me, then renders the shell. Anyone not logged in goes to /login and comes back after. */
 function RequireAuth() {
@@ -34,81 +33,37 @@ function Shell() {
     navigate('/login', { replace: true });
   }
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:py-8">
-      <header className="flex items-center justify-between">
-        <Link to="/" aria-label="All apps">
-          <Logo />
-        </Link>
-        <button className="btn" onClick={logout}>
-          Log out
-        </button>
-      </header>
-      <main className="mt-8">
-        <Outlet />
-      </main>
-    </div>
+    <AppShell onLogout={logout}>
+      <Outlet />
+    </AppShell>
   );
 }
 
-const TABS = [
-  { to: '', label: 'Overview', end: true },
-  { to: 'customers', label: 'Customers' },
-  { to: 'links', label: 'Links' },
-  { to: 'settings', label: 'Settings' },
-];
-
-/** Frame of every /apps/:id page: the app's name and its sections. The pages themselves arrive in later tasks. */
+/** Frame of every /apps/:id page. The shell supplies the app; this adds the not-found state and the small-screen setup banner. */
 function AppLayout() {
-  const { id } = useParams();
-  const location = useLocation();
-  const onSetupPage = location.pathname.endsWith('/setup');
-  // Re-read on every navigation inside the app, so the banner is gone right after the wizard finishes.
-  const [navTick, setNavTick] = useState(0);
-  useEffect(() => setNavTick((n) => n + 1), [location.pathname]);
-  const setup = useApi<SetupStatus>(id && !onSetupPage ? `/api/apps/${id}/setup` : null, navTick);
-  const [app, setApp] = useState<AppInfo | null | undefined>(undefined);
-  useEffect(() => {
-    api<AppInfo[]>('/api/apps')
-      .then((all) => setApp(all.find((a) => a.id === id) ?? null))
-      .catch(() => setApp(null));
-  }, [id]);
+  const { app, setup } = useShell();
+  const onSetupPage = useLocation().pathname.endsWith('/setup');
   if (app === undefined) return null;
   if (app === null) {
     return (
-      <div className="card p-10 text-center text-stone-500">
+      <div className="card p-10 text-center text-muted-foreground">
         This app does not exist. <Link className="underline" to="/">Back to all apps</Link>
       </div>
     );
   }
   return (
-    <div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Link to="/" className="text-stone-400 hover:text-ink" aria-label="All apps">
-            ←
-          </Link>
-          <h1 className="text-2xl font-semibold">{app.name}</h1>
-        </div>
-        <nav className="tabs" aria-label="App sections">
-          {TABS.map((t) => (
-            <NavLink key={t.to} to={t.to} end={t.end} className={({ isActive }) => `tab ${isActive ? 'tab-active' : ''}`}>
-              {t.label}
-            </NavLink>
-          ))}
-        </nav>
-      </div>
-      {!onSetupPage && !setup.loading && setup.data && setup.data.current !== null && (
+    <div className="mx-auto max-w-[1400px]">
+      {/* On large screens the sidebar checklist takes this role. */}
+      {!onSetupPage && setup && setup.current !== null && (
         <Link
           to={`/apps/${app.id}/setup`}
-          className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 hover:bg-amber-100"
+          className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-revenue/30 bg-revenueSoft/50 px-4 py-2.5 text-sm text-[#7a3320] transition-colors hover:bg-revenueSoft lg:hidden"
         >
-          <span>Finish setup ({progressCount(setup.data)}/{SETUP_STEPS.length})</span>
+          <span>Finish setup ({progressCount(setup)}/{SETUP_STEPS.length})</span>
           <span aria-hidden="true">→</span>
         </Link>
       )}
-      <div className="mt-6">
-        <Outlet />
-      </div>
+      <Outlet />
     </div>
   );
 }

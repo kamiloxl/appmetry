@@ -1,10 +1,20 @@
+import { ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { duration, money, number, pct, pctChange } from '../lib/format';
 import type { Overview, Totals } from '../lib/types';
+import { cn } from '../lib/utils';
 
 function Change({ cur, prev }: { cur: number; prev: number }) {
   const c = pctChange(cur, prev);
-  if (c === null) return <span className="text-xs text-stone-400">{pct(null)}</span>;
-  return <span className={`text-xs ${c >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>{pct(c)}</span>;
+  if (c === null) return <span className="text-xs text-muted-foreground">{pct(null)}</span>;
+  const up = c >= 0;
+  const Icon = up ? ArrowUpRight : ArrowDownRight;
+  return (
+    <span className={cn('inline-flex items-center gap-0.5 text-xs font-medium', up ? 'text-emerald-700' : 'text-red-600')}>
+      <Icon className="size-3.5" aria-hidden="true" />
+      {pct(c)}
+      <span className="font-normal text-muted-foreground">&nbsp;vs prev.</span>
+    </span>
+  );
 }
 
 const KPIS: { key: keyof Totals; label: string; format: (v: number) => string; dot?: string }[] = [
@@ -17,22 +27,34 @@ const KPIS: { key: keyof Totals; label: string; format: (v: number) => string; d
   { key: 'avgSessionMs', label: 'Avg session', format: duration },
 ];
 
-/** The seven KPI cards of the Overview page, each with its change against the previous period. */
+/** The seven KPIs of the Overview page as one strip, each with its change against the previous period. */
 export function OverviewCard({ data, stale = false }: { data: Overview | null; stale?: boolean }) {
   return (
-    <div className={`grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7 ${stale ? 'opacity-60' : ''}`} aria-busy={stale}>
-      {data
-        ? KPIS.map((k) => (
-            <div key={k.key} className="card px-4 py-3" data-testid={`card-${k.key}`}>
-              <div className="flex items-center gap-1.5 text-sm text-stone-500">
-                {k.dot && <span className={`h-2.5 w-2.5 rounded-sm ${k.dot}`} />}
-                {k.label}
-              </div>
-              <div className="mt-1 text-2xl font-semibold leading-tight tracking-tight">{k.format(data.current[k.key])}</div>
-              <Change cur={data.current[k.key]} prev={data.previous[k.key]} />
+    <section className={cn('card overflow-hidden transition-opacity', stale && 'opacity-60')} aria-busy={stale || !data} aria-label="Key metrics">
+      {/* Cells draw their right and bottom borders; the negative margin tucks the outer ones under the card edge. */}
+      <div className="-mb-px -mr-px grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7">
+        {KPIS.map((k) => (
+          <div key={k.key} className="min-w-0 border-b border-r px-4 py-3.5" data-testid={data ? `card-${k.key}` : undefined}>
+            <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+              {k.dot && <span className={cn('size-2 rounded-sm', k.dot)} aria-hidden="true" />}
+              <span className="truncate">{k.label}</span>
             </div>
-          ))
-        : KPIS.map((k) => <div key={k.key} className="card h-[92px] animate-pulse bg-stone-50" />)}
-    </div>
+            {data ? (
+              <>
+                <div className="mt-1.5 truncate text-[22px] font-semibold leading-tight tracking-tight">{k.format(data.current[k.key])}</div>
+                <div className="mt-1">
+                  <Change cur={data.current[k.key]} prev={data.previous[k.key]} />
+                </div>
+              </>
+            ) : (
+              <div className="mt-2 space-y-2" aria-hidden="true">
+                <div className="h-6 w-20 animate-pulse rounded bg-muted" />
+                <div className="h-3 w-14 animate-pulse rounded bg-muted" />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
