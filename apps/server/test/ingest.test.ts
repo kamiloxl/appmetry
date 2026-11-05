@@ -373,6 +373,42 @@ describe('POST /api/v1/batch', () => {
     expect(await install(app)).toMatchObject({ attribution_method: 'search_ads', source: 'Apple Search Ads' });
   });
 
+  it('a nameless screen does not blank entry_screen or exit_screen', async () => {
+    const app = await createApp(cookie);
+    await send(app, [ev('screen', { name: 'Home', at: -3000 })]);
+    // Earlier and later screens without a name still count, but never replace a named entry/exit screen.
+    await send(app, [ev('screen', { at: -9000 }), ev('screen', { at: -1000 })]);
+    expect(await session(app)).toMatchObject({ entry_screen: 'Home', exit_screen: 'Home', screens: 3 });
+  });
+
+  it('retry applies a deep_link upgrade that was lost after commit', async () => {
+    const app = await createApp(cookie);
+    await send(app, [ev('install', { at: -5000 })]);
+    // Simulate a commit whose attribution follow-up never ran: the event row exists, the install is still organic.
+    const link = ev('deep_link', { name: 'myapp://open?utm_source=google&utm_medium=cpc&utm_campaign=c1', at: -4000 });
+    await env.DB.prepare('INSERT INTO events (app_id, id, session_id, install_id, ts, type, name) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .bind(app.id, link.id, link.sid, 'install-0001', link.ts, link.type, link.name)
+      .run();
+    expect((await install(app))!.attribution_method).toBe('organic');
+
+    const calls: string[] = [];
+    const res = await ingestBatch(env.DB, app, { context: context() as never, events: [link] }, GEO, Date.now(), async (_iid, e) => {
+      calls.push(e.id);
+    });
+    expect(res).toEqual({ inserted: 0, dropped: 0 });
+    expect(await install(app)).toMatchObject({ attribution_method: 'deep_link', source: 'Google', utm_campaign: 'c1' });
+
+    // A retry of an install batch never fires onInstall again, even though attribution is re-derived.
+    const inst = ev('install', { at: -6000, sid: 'session-0003' });
+    await ingestBatch(env.DB, app, { context: context() as never, events: [inst] }, GEO, Date.now(), async (_iid, e) => {
+      calls.push(e.id);
+    });
+    await ingestBatch(env.DB, app, { context: context() as never, events: [inst, link] }, GEO, Date.now(), async (_iid, e) => {
+      calls.push(e.id);
+    });
+    expect(calls).toEqual([inst.id]);
+  });
+
   it('exit_screen tracks the latest screen by ts', async () => {
     const app = await createApp(cookie);
     await send(app, [ev('screen', { name: 'B', at: -3000 }), ev('screen', { name: 'C', at: -2000 })]);

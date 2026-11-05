@@ -173,18 +173,39 @@ function rowToAttribution(row: InstallAttrRow): InstallAttribution {
   };
 }
 
-/** Session aggregates are recomputed from the stored events, so a retried or overlapping batch can never double-count. */
+/**
+ * Session aggregates are recomputed from the stored events, so a retried or overlapping batch can never double-count.
+ * One pass over the session's events for the counters and bounds, plus two indexed lookups for entry/exit screens
+ * (`events_session_type_ts`). Nameless screens never blank entry/exit.
+ */
 const RECOMPUTE_SESSION = `
 UPDATE sessions SET
-  started_at   = MIN(started_at,   COALESCE((SELECT MIN(ts) FROM events WHERE app_id = ?1 AND session_id = ?2), started_at)),
-  last_seen_at = MAX(last_seen_at, COALESCE((SELECT MAX(ts) FROM events WHERE app_id = ?1 AND session_id = ?2), last_seen_at)),
-  screens = (SELECT COUNT(*) FROM events WHERE app_id = ?1 AND session_id = ?2 AND type = 'screen'),
-  events  = (SELECT COUNT(*) FROM events WHERE app_id = ?1 AND session_id = ?2 AND type = 'event'),
-  duration = (SELECT COALESCE(SUM(MIN(MAX(COALESCE(CAST(json_extract(props, '$.ms') AS INTEGER), 0), 0), ${MAX_PING_MS})), 0)
-              FROM events WHERE app_id = ?1 AND session_id = ?2 AND type = 'ping'),
-  entry_screen = (SELECT name FROM events WHERE app_id = ?1 AND session_id = ?2 AND type = 'screen' ORDER BY ts ASC, id ASC LIMIT 1),
-  exit_screen  = (SELECT name FROM events WHERE app_id = ?1 AND session_id = ?2 AND type = 'screen' ORDER BY ts DESC, id DESC LIMIT 1)
+  (started_at, last_seen_at, screens, events, duration) = (
+    SELECT MIN(sessions.started_at,   COALESCE(MIN(e.ts), sessions.started_at)),
+           MAX(sessions.last_seen_at, COALESCE(MAX(e.ts), sessions.last_seen_at)),
+           COALESCE(SUM(e.type = 'screen'), 0),
+           COALESCE(SUM(e.type = 'event'), 0),
+           COALESCE(SUM(CASE WHEN e.type = 'ping'
+             THEN MIN(MAX(COALESCE(CAST(json_extract(e.props, '$.ms') AS INTEGER), 0), 0), ${MAX_PING_MS}) ELSE 0 END), 0)
+    FROM events e WHERE e.app_id = ?1 AND e.session_id = ?2),
+  entry_screen = (SELECT name FROM events WHERE app_id = ?1 AND session_id = ?2 AND type = 'screen' AND name IS NOT NULL
+                  ORDER BY ts ASC, id ASC LIMIT 1),
+  exit_screen  = (SELECT name FROM events WHERE app_id = ?1 AND session_id = ?2 AND type = 'screen' AND name IS NOT NULL
+                  ORDER BY ts DESC, id DESC LIMIT 1)
 WHERE app_id = ?1 AND id = ?2`;
+
+type LinkTouch = { e: SdkEvent; touch: NonNullable<ReturnType<typeof extractTouch>> };
+
+/** Deep links in `events` (ts order) that carry a touch, read from the cleaned URL. */
+function deepLinkTouches(events: SdkEvent[]): LinkTouch[] {
+  const out: LinkTouch[] = [];
+  for (const e of events) {
+    if (e.type !== 'deep_link' || !e.name) continue;
+    const touch = extractTouch(stripPrivateParams(e.name));
+    if (touch) out.push({ e, touch });
+  }
+  return out;
+}
 
 /**
  * Write one validated batch. Idempotent: events already stored (same `(app_id, id)`) are skipped, and session
@@ -223,7 +244,11 @@ export async function ingestBatch(
     .all<{ id: string }>();
   const known = new Set(existing.results.map((r) => r.id));
   const fresh = events.filter((e) => !known.has(e.id));
-  if (!fresh.length) return { inserted: 0, dropped };
+  if (!fresh.length) {
+    // Everything is stored already, but a previous attempt may have died before the attribution follow-up.
+    await upgradeAttribution(db, app.id, iid, events);
+    return { inserted: 0, dropped };
+  }
 
   const firstTs = fresh[0].ts;
   const lastTs = fresh[fresh.length - 1].ts;
@@ -288,14 +313,8 @@ export async function ingestBatch(
   }
 
   // 4b. Session source from its first deep link with a touch (only while still Direct), then aggregates.
-  const deepLinks: Array<{ e: SdkEvent; touch: NonNullable<ReturnType<typeof extractTouch>> }> = [];
   for (const [sid, list] of bySession) {
-    for (const e of list) {
-      if (e.type !== 'deep_link' || !e.name) continue;
-      const touch = extractTouch(stripPrivateParams(e.name));
-      if (touch) deepLinks.push({ e, touch });
-    }
-    const first = deepLinks.find((d) => d.e.sid === sid);
+    const first = deepLinkTouches(list)[0];
     if (first) {
       const { source, channel } = classify({ utmSource: first.touch.utm_source, utmMedium: first.touch.utm_medium, ref: first.touch.ref });
       if (channel !== 'Direct') {
@@ -346,24 +365,19 @@ export async function ingestBatch(
     }
   }
 
-  // 7b. Attribution upgrades: a reported source, or a deep link in the install's earliest session.
-  const insertedIds = new Set(inserted.map((e) => e.id));
-  const sources = inserted.filter((e) => e.type === 'source' && e.name && e.name.trim());
-  const links = deepLinks.filter((d) => insertedIds.has(d.e.id));
-  if (sources.length || links.length) {
-    await upgradeAttribution(db, app.id, iid, sources, links);
-  }
+  // 7b. Attribution upgrades from every valid event in the batch, not only new ones: if a previous attempt
+  // committed and then died, its retry still applies the upgrade. mergeAttribution makes this idempotent.
+  await upgradeAttribution(db, app.id, iid, events);
 
   return { inserted: inserted.length, dropped };
 }
 
-async function upgradeAttribution(
-  db: D1Database,
-  appId: string,
-  iid: string,
-  sources: SdkEvent[],
-  links: Array<{ e: SdkEvent; touch: NonNullable<ReturnType<typeof extractTouch>> }>,
-): Promise<void> {
+/** Apply a reported source, or a deep link in the install's earliest session, when it beats the current method. */
+async function upgradeAttribution(db: D1Database, appId: string, iid: string, events: SdkEvent[]): Promise<void> {
+  const sources = events.filter((e) => e.type === 'source' && e.name && e.name.trim());
+  const links = deepLinkTouches(events);
+  if (!sources.length && !links.length) return;
+
   const row = await db
     .prepare(`SELECT attribution_method, ${ATTRIBUTION_COLUMNS.join(', ')} FROM installs WHERE app_id = ? AND id = ?`)
     .bind(appId, iid)

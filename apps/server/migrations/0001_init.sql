@@ -101,6 +101,8 @@ CREATE TABLE events (
 );
 CREATE INDEX events_ts ON events (app_id, ts);
 CREATE INDEX events_session_id ON events (app_id, session_id);
+-- Session aggregates and entry/exit screen lookups during ingestion (src/ingest.ts).
+CREATE INDEX events_session_type_ts ON events (app_id, session_id, type, ts);
 
 CREATE TABLE links (
   id TEXT PRIMARY KEY,
