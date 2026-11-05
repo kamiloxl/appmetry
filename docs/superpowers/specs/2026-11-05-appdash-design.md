@@ -36,7 +36,7 @@ money?*
 ## 2. Architecture
 
 ```
-mobile data log/                 (pnpm workspaces, TypeScript everywhere, MIT)
+mobile data log/                 (pnpm workspaces, TypeScript everywhere, FSL-1.1-MIT)
 ├─ packages/sdk-expo             @appdash/expo — published to npm
 │   ├─ src/                      queue, sessions, screens, public API, Expo Router provider
 │   ├─ ios/ android/             Expo Module "AppdashAttribution": AdServices token / Install Referrer
@@ -363,8 +363,8 @@ The person deploying an instance is the controller for their app's users; appdas
   nulls identity fields on payments (payment amounts stay for accounting).
 - **Location/transfer**: README tells deployers to create D1 with an EU location hint/jurisdiction and points to
   Cloudflare's DPA; Workers execute globally.
-- **amicable note**: if used in an amicable app, sending emails/names via `identify()` needs a DPIA first; send only
-  an opaque `userId`.
+- **Sensitive apps**: if the app handles sensitive personal data, sending emails/names via `identify()` needs a DPIA
+  first; prefer an opaque `userId`.
 
 ## 8. Security (OWASP Top 10 2025)
 

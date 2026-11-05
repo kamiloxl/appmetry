@@ -45,12 +45,12 @@
     "attribution",
     "AppdashAttribution"
   ],
-  "repository": "https://github.com/OWNER/appdash",
+  "repository": "https://github.com/kamiloxl/appdash",
   "bugs": {
-    "url": "https://github.com/OWNER/appdash/issues"
+    "url": "https://github.com/kamiloxl/appdash/issues"
   },
-  "homepage": "https://github.com/OWNER/appdash#readme",
-  "license": "MIT",
+  "homepage": "https://github.com/kamiloxl/appdash#readme",
+  "license": "FSL-1.1-MIT",
   "peerDependencies": {
     "@react-native-async-storage/async-storage": "*",
     "expo": "*",

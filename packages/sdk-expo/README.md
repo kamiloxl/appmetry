@@ -1,6 +1,6 @@
 # @appdash/expo
 
-SDK for [appdash](https://github.com/OWNER/appdash): self-hosted, revenue-first analytics for Expo apps. It gives you sessions, screens, custom events, install attribution and RevenueCat revenue matching, with an offline queue.
+SDK for [appdash](https://github.com/kamiloxl/appdash): self-hosted, revenue-first analytics for Expo apps. It gives you sessions, screens, custom events, install attribution and RevenueCat revenue matching, with an offline queue.
 
 ## Install
 
@@ -86,4 +86,4 @@ Expo Go has no native module: attribution inputs are skipped silently and instal
 
 `await Appdash.installId()` and `await Appdash.flush()` are available. The install id is a random UUID, never IDFA/GAID, so no ATT prompt is needed. A reinstall is a new install.
 
-MIT licensed.
+Licensed under FSL-1.1-MIT (source-available; each version becomes MIT two years after release). Using it in your own apps, including commercial apps, is allowed; offering a competing commercial product or service is not. See [LICENSE](LICENSE).

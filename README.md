@@ -1,9 +1,8 @@
 # appdash
 
-appdash is an open-source, self-hosted, revenue-first analytics product for Expo apps. It shows which acquisition sources and in-app behaviour actually drive revenue. It runs on your own free Cloudflare account (Workers + D1), with a React dashboard and an Expo SDK (`@appdash/expo`). No central appdash server exists and no telemetry is sent to the appdash project.
+appdash is a source-available, self-hosted, revenue-first analytics product for Expo apps. It shows which acquisition sources and in-app behaviour actually drive revenue. It runs on your own free Cloudflare account (Workers + D1), with a React dashboard and an Expo SDK (`@appdash/expo`). No central appdash server exists and no telemetry is sent to the appdash project.
 
-<!-- MAINTAINER: replace OWNER in the URLs below (and in packages/sdk-expo/package.json) with the real GitHub owner once the repo is public. -->
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/OWNER/appdash)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/kamiloxl/appdash)
 
 > The Deploy button creates the D1 database in Cloudflare's automatic location, which cannot be pinned to the EU. If your users are in the UK/EU, read [Data location](#data-location) before you click it.
 
@@ -114,7 +113,7 @@ This section is a starting point, not legal advice.
 - **Retention.** Per-app `retention_months`, default 25. An hourly job (each app at most once per 23 h) deletes events, sessions and link clicks older than the cutoff. It then deletes installs whose last activity is older than the cutoff and that have no session left. For those installs, link clicks are detached, and their payments lose install id, `app_user_id` and session id and get `matched_by = erased`, and their RevenueCat delivery logs lose install id and `app_user_id`, but the rows stay. Payments are never deleted by retention. RevenueCat delivery logs are deleted after 30 days.
 - **Erasure.** Settings → Delete user data, by `user_id` or install id. It deletes the matching installs with their sessions and events, detaches their link clicks (the click rows stay), and clears, on their payments, the install id, RevenueCat `app_user_id` and session id (`matched_by` becomes `erased`), and on their delivery logs the install id and `app_user_id`. Payment rows (amount, timestamp, product, store) are kept for accounting without identifying fields. With a `user_id` it also clears `app_user_id` on all payments and delivery logs of that app with that RevenueCat `app_user_id`.
 - **Location and processor.** See [Data location](#data-location) and Cloudflare's DPA. GitHub holds your fork; npm serves the SDK at build time; RevenueCat sends webhooks in.
-- Using appdash inside an amicable product: sending emails or names through `identify` needs a DPIA first. Send only an opaque `userId`.
+- If your app handles sensitive personal data (for example health, legal or family matters), do a DPIA before sending emails or names through `identify`, and prefer an opaque `userId`.
 
 ## Security
 
@@ -161,7 +160,6 @@ The example app in [examples/expo-demo](examples/expo-demo) and the checks in [d
 
 Maintainer checklist:
 
-- [ ] Replace `OWNER` in the Deploy button URL and comment in this README, in `packages/sdk-expo/package.json` (`repository`, `bugs`, `homepage`) and in `packages/sdk-expo/README.md`.
 - [ ] Add the `NPM_TOKEN` repository secret (npm automation token).
 - [ ] Add screenshots of the Cloudflare deploy screens to the "Deploy in 5 minutes" section.
 
@@ -171,4 +169,10 @@ Only `@appdash/expo` is published (`@appdash/shared` is bundled into it and priv
 
 ## License
 
-MIT
+appdash is licensed under the [Functional Source License, Version 1.1, MIT Future License](LICENSE) (FSL-1.1-MIT). It is source-available, not OSI open source.
+
+- **You may** use, copy, modify and redistribute it for any purpose other than a Competing Use. That includes running it to measure your own apps, including commercial apps, plus internal use, non-commercial education and research, and professional services for a licensee.
+- **You may not**, without a commercial license, make it available to others in a commercial product or service that substitutes for appdash or offers substantially similar functionality (for example selling it, or a hosted appdash-like analytics service).
+- **Each version becomes MIT** two years after its release.
+
+For a commercial license, open an issue or contact the maintainer. Portions adapted from Datadash remain under the MIT License; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). This summary is not legal advice; the [LICENSE](LICENSE) text governs.

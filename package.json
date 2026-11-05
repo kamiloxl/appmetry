@@ -1,6 +1,7 @@
 {
   "name": "appdash",
   "private": true,
+  "license": "FSL-1.1-MIT",
   "engines": {
     "node": ">=22.12"
   },
