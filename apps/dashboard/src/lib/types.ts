@@ -111,3 +111,23 @@ export interface LinkStat {
   installs: number;
   revenue: number;
 }
+
+/** GET /api/apps/:id/revenuecat/health. Counts cover the last 24 h of production deliveries. */
+export interface RcHealth {
+  lastEventAt: number | null;
+  events24h: number;
+  withInstallId24h: number;
+  matched24h: number;
+  /** True when fewer than 50% of the 24 h events carry appdash_install_id. */
+  warning: boolean;
+}
+
+/** POST /api/apps/:id/rc-secret. The only time the secret is visible. */
+export interface RcSecret {
+  secret: string;
+}
+
+/** DELETE /api/apps/:id/users. */
+export interface EraseResult {
+  installs: number;
+}

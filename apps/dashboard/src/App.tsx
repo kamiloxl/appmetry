@@ -8,6 +8,7 @@ import { Customers } from './pages/Customers';
 import { Links } from './pages/Links';
 import { Login } from './pages/Login';
 import { Overview } from './pages/Overview';
+import { Settings } from './pages/Settings';
 
 /** Waits for /api/auth/me, then renders the shell. Anyone not logged in goes to /login and comes back after. */
 function RequireAuth() {
@@ -122,7 +123,7 @@ export function App() {
           <Route index element={<Overview />} />
           <Route path="customers" element={<Customers />} />
           <Route path="links" element={<Links />} />
-          <Route path="settings" element={<Back title="Settings coming soon" />} />
+          <Route path="settings" element={<Settings />} />
           <Route path="setup" element={<Back title="Setup wizard coming soon" />} />
         </Route>
       </Route>
