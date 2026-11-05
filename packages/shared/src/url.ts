@@ -21,26 +21,25 @@ function decode(s: string): string {
 }
 
 // Manual split: custom schemes (myapp://x?...) are not reliably handled by URL in React Native.
-function split(url: string): { base: string; query: string; hash: string } {
+function split(url: string): { base: string; query: string } {
   const h = url.indexOf('#');
-  const hash = h >= 0 ? url.slice(h) : '';
   const rest = h >= 0 ? url.slice(0, h) : url;
   const q = rest.indexOf('?');
   return q >= 0
-    ? { base: rest.slice(0, q), query: rest.slice(q + 1), hash }
-    : { base: rest, query: '', hash };
+    ? { base: rest.slice(0, q), query: rest.slice(q + 1) }
+    : { base: rest, query: '' };
 }
 
 export function stripPrivateParams(url: string): string {
   if (typeof url !== 'string') return url;
-  const { base, query, hash } = split(url);
-  if (!query) return url;
+  const { base, query } = split(url);
+  if (!query) return base; // fragment is always dropped: it can carry tokens and is never used for attribution
   const kept = query.split('&').filter((pair) => {
     if (!pair) return false;
     const eq = pair.indexOf('=');
     return !PRIVATE_PARAM.test(decode(eq >= 0 ? pair.slice(0, eq) : pair));
   });
-  return base + (kept.length ? '?' + kept.join('&') : '') + hash;
+  return base + (kept.length ? '?' + kept.join('&') : '');
 }
 
 const UTM = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'] as const;
