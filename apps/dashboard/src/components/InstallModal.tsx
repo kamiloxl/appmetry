@@ -40,7 +40,7 @@ export function InstallModal({ appId, customer, onClose }: { appId: string; cust
             <Stat label="Total spent" value={money(customer.total)} accent />
             <Stat label="Payments" value={String(customer.payments)} />
             <Stat label="Source" value={customer.source ?? '(none)'} />
-            <Stat label="Time to convert" value={duration(customer.timeToConvertMs)} />
+            <Stat label="Time to convert" value={duration(Math.max(0, customer.timeToConvertMs))} />
           </div>
           {error && <div className="mt-6 text-sm text-red-600" role="alert">Could not load the timeline: {error}</div>}
           {!data && !error && <div className="mt-6 h-60 animate-pulse rounded-xl bg-stone-50" />}

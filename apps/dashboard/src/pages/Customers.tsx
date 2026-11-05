@@ -101,8 +101,14 @@ export function Customers() {
                     key={c.installId}
                     className="cursor-pointer border-b border-stone-50 last:border-0 hover:bg-stone-50 focus:bg-stone-50 focus:outline-none"
                     tabIndex={0}
+                    role="button"
                     onClick={() => setOpen(c)}
-                    onKeyDown={(e) => e.key === 'Enter' && setOpen(c)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setOpen(c);
+                      }
+                    }}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
