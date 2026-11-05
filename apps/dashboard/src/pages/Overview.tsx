@@ -41,13 +41,13 @@ export function Overview() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
+        <FilterBar filters={q.filters} onRemove={remove} hint="Click a row in any breakdown to filter" />
         <Toolbar q={q} update={update} onRefresh={() => setReloadKey((k) => k + 1)} loading={loading} />
-        <FilterBar filters={q.filters} onRemove={remove} />
       </div>
       {error ? (
-        <div className="card p-6 text-sm text-red-600" role="alert">
+        <div className="card flex flex-wrap items-center gap-3 p-6 text-sm text-red-600" role="alert">
           Could not load the overview: {error}
-          <button className="btn ml-3" onClick={() => setRetry((n) => n + 1)}>
+          <button className="btn" onClick={() => setRetry((n) => n + 1)}>
             Retry
           </button>
         </div>
@@ -57,7 +57,7 @@ export function Overview() {
           <Chart series={data?.series ?? null} stale={loading && data !== null} />
         </>
       )}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-2">
         {GROUPS.map((tabs) => (
           <Panel key={tabs[0]!.dim} appId={id} q={q} tabs={tabs} reloadKey={reloadKey} onPick={pick} />
         ))}

@@ -1,3 +1,4 @@
+import { ArrowRight, Plus } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { Modal } from '../components/Modal';
@@ -20,12 +21,12 @@ export function Apps() {
   if (apps && apps.length === 0) return <Navigate to="/setup" replace />;
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Your apps</h1>
+    <div className="mx-auto max-w-[1400px]">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">{apps ? `${apps.length} ${apps.length === 1 ? 'app' : 'apps'}` : 'Loading…'}</p>
         {apps && apps.length > 0 && (
           <button className="btn-dark" onClick={() => setAdding(true)}>
-            + New app
+            <Plus className="size-4" aria-hidden="true" /> New app
           </button>
         )}
       </div>
@@ -34,9 +35,17 @@ export function Apps() {
 
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {apps?.map((a) => (
-          <Link key={a.id} to={`/apps/${a.id}`} className="card p-5 transition hover:-translate-y-0.5 hover:shadow-md">
-            <div className="truncate text-lg font-semibold">{a.name}</div>
-            <div className="mt-1 text-sm text-stone-500">Created {dateLabel(a.created_at)}</div>
+          <Link key={a.id} to={`/apps/${a.id}`} className="card group p-5 transition-colors hover:border-stone-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <div className="flex items-center gap-3">
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-revenue" aria-hidden="true">
+                {a.name.trim().charAt(0).toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-semibold">{a.name}</div>
+                <div className="text-sm text-muted-foreground">Created {dateLabel(a.created_at)}</div>
+              </div>
+              <ArrowRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+            </div>
             <div className="mt-4">
               {a.has_rc_secret ? (
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">

@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import type { ReactNode } from 'react';
 import type { QueryState } from '../lib/query';
 import { canShiftForward, shiftRange } from '../lib/shiftRange';
+import { Button } from './ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from './ui/dropdown-menu';
 
 export const RANGE_OPTIONS: { value: string; label: string }[] = [
   { value: 'today', label: 'Today' },
@@ -21,109 +24,64 @@ const INTERVAL_OPTIONS = [
   { value: 'month', label: 'Monthly' },
 ];
 
-export function Dropdown({ button, children, align = 'left' }: { button: ReactNode; children: (close: () => void) => ReactNode; align?: 'left' | 'right' }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const on = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
-    document.addEventListener('mousedown', on);
-    return () => document.removeEventListener('mousedown', on);
-  }, [open]);
-  return (
-    <div className="relative flex" ref={ref}>
-      <div className="flex" onClick={() => setOpen((o) => !o)}>
-        {button}
-      </div>
-      {open && (
-        <div className={`card absolute top-full z-40 mt-2 min-w-[200px] overflow-hidden p-1 ${align === 'right' ? 'right-0' : 'left-0'}`}>
-          {children(() => setOpen(false))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const Chevron = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-stone-400" aria-hidden="true">
-    <path d="m6 9 6 6 6-6" />
-  </svg>
-);
-
-const itemCls = (active: boolean) =>
-  `flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-stone-100 ${active ? 'font-medium text-ink' : 'text-stone-600'}`;
+const triggerCls =
+  'flex h-full items-center gap-2 px-3 text-sm font-medium outline-none transition-colors hover:bg-accent focus-visible:bg-accent data-[state=open]:bg-accent';
 
 /** Range, interval and refresh for the stats pages. State lives in the URL (see lib/query.ts). */
 export function Toolbar({ q, update, onRefresh, loading, left }: { q: QueryState; update: (p: Partial<QueryState>) => void; onRefresh: () => void; loading: boolean; left?: ReactNode }) {
   const day = (t: number) => new Date(t).toLocaleDateString('en', { day: 'numeric', month: 'short' });
   const label =
     q.range === 'custom' && q.from !== undefined && q.to !== undefined
-      ? `${day(q.from)} → ${day(q.to - 1)}`
+      ? `${day(q.from)} – ${day(q.to - 1)}`
       : (RANGE_OPTIONS.find((p) => p.value === q.range)?.label ?? (q.range === 'custom' ? 'Custom range' : 'Last 30 days'));
   const now = Date.now();
   const back = shiftRange(q, -1, now);
   const forward = canShiftForward(q, now) ? shiftRange(q, 1, now) : null;
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
       {left}
-      <div className="flex h-11 items-stretch rounded-xl border border-stone-200 bg-white shadow-card">
-        <button className="rounded-l-xl px-3 text-xl text-stone-500 hover:bg-stone-50 disabled:opacity-30" onClick={() => back && update(back)} disabled={!back} aria-label="Previous period">
-          ‹
+      <div className="flex h-9 items-stretch overflow-hidden rounded-lg border bg-card shadow-card">
+        <button className="px-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30" onClick={() => back && update(back)} disabled={!back} aria-label="Previous period">
+          <ChevronLeft className="size-4" />
         </button>
-      <Dropdown
-        button={
-          <button className="flex h-full items-center gap-2 border-x border-stone-200 px-4 text-base font-medium hover:bg-stone-50">
-            {label} <Chevron />
-          </button>
-        }
-      >
-        {(close) =>
-          RANGE_OPTIONS.map((p) => (
-            <button
-              key={p.value}
-              className={itemCls(q.range === p.value)}
-              onClick={() => {
-                close();
-                update({ range: p.value, from: undefined, to: undefined, interval: undefined });
-              }}
-            >
-              {p.label}
-            </button>
-          ))
-        }
-      </Dropdown>
-        <button className="rounded-r-xl px-3 text-xl text-stone-500 hover:bg-stone-50 disabled:opacity-30" onClick={() => forward && update(forward)} disabled={!forward} aria-label="Next period">
-          ›
+        <DropdownMenu>
+          <DropdownMenuTrigger className={`${triggerCls} border-x`}>
+            <CalendarDays className="size-4 text-muted-foreground" aria-hidden="true" />
+            {label}
+            <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuRadioGroup value={q.range} onValueChange={(v) => update({ range: v, from: undefined, to: undefined, interval: undefined })}>
+              {RANGE_OPTIONS.map((p) => (
+                <DropdownMenuRadioItem key={p.value} value={p.value}>
+                  {p.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <button className="px-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30" onClick={() => forward && update(forward)} disabled={!forward} aria-label="Next period">
+          <ChevronRight className="size-4" />
         </button>
       </div>
-      <Dropdown
-        button={
-          <button className="btn h-11 px-4 text-base">
-            {INTERVAL_OPTIONS.find((g) => g.value === q.interval)?.label ?? 'Auto interval'} <Chevron />
-          </button>
-        }
-      >
-        {(close) =>
-          INTERVAL_OPTIONS.map((g) => (
-            <button
-              key={g.value}
-              className={itemCls(q.interval === g.value)}
-              onClick={() => {
-                close();
-                update({ interval: g.value });
-              }}
-            >
-              {g.label}
-            </button>
-          ))
-        }
-      </Dropdown>
-      <button className="btn h-11 w-11 px-0" onClick={onRefresh} aria-label="Refresh">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={loading ? 'animate-spin' : ''} aria-hidden="true">
-          <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
-          <path d="M21 3v5h-5" />
-        </svg>
-      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger className={`${triggerCls} h-9 rounded-lg border bg-card shadow-card`}>
+          {INTERVAL_OPTIONS.find((g) => g.value === q.interval)?.label ?? 'Auto interval'}
+          <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-40">
+          <DropdownMenuRadioGroup value={q.interval ?? ''} onValueChange={(v) => update({ interval: v })}>
+            {INTERVAL_OPTIONS.map((g) => (
+              <DropdownMenuRadioItem key={g.value} value={g.value}>
+                {g.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button variant="outline" size="icon" onClick={onRefresh} aria-label="Refresh">
+        <RefreshCw className={loading ? 'animate-spin' : ''} />
+      </Button>
     </div>
   );
 }

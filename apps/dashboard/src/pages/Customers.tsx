@@ -46,8 +46,8 @@ export function Customers() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Toolbar q={q} update={update} onRefresh={() => setReloadKey((k) => k + 1)} loading={loading} />
         <FilterBar filters={q.filters} onRemove={remove} />
+        <Toolbar q={q} update={update} onRefresh={() => setReloadKey((k) => k + 1)} loading={loading} />
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <button className="btn" onClick={tryMatching} disabled={rematch.state === 'busy'}>

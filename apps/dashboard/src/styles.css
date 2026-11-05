@@ -3,17 +3,70 @@
 @tailwind utilities;
 
 /* System fonts only: the CSP in public/_headers does not allow third-party font hosts. */
-html, body { background: #f8f6f3; color: #1c1917; }
-body { font-feature-settings: 'tnum' 1; -webkit-font-smoothing: antialiased; }
+@layer base {
+  :root {
+    /* shadcn/ui tokens on the appmetry palette: paper background, ink foreground, stone neutrals. */
+    --background: 36 23% 96%; /* paper #f8f6f3 */
+    --foreground: 24 10% 10%; /* ink #1c1917 */
+    --card: 0 0% 100%;
+    --card-foreground: 24 10% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 24 10% 10%;
+    --primary: 24 10% 10%;
+    --primary-foreground: 36 23% 98%;
+    --secondary: 34 14% 93%;
+    --secondary-foreground: 24 10% 10%;
+    --muted: 34 14% 93%;
+    --muted-foreground: 25 6% 40%;
+    --accent: 34 16% 91%;
+    --accent-foreground: 24 10% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 30 9% 88%;
+    --input: 30 9% 86%;
+    --ring: 24 6% 64%;
+    --radius: 0.75rem;
+    --sidebar: 34 18% 94%;
+    --sidebar-foreground: 24 10% 10%;
+    --sidebar-accent: 33 14% 89%;
+    --sidebar-border: 30 10% 87%;
+  }
+  html,
+  body {
+    @apply bg-background text-foreground;
+  }
+  body {
+    font-feature-settings: 'tnum' 1;
+    -webkit-font-smoothing: antialiased;
+  }
+  * {
+    @apply border-border;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+}
 
 @layer components {
-  .card { @apply rounded-2xl border border-stone-200/80 bg-white shadow-card; }
-  .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-sm font-medium shadow-card transition hover:bg-stone-50 disabled:opacity-50; }
-  .btn-dark { @apply inline-flex items-center justify-center gap-2 rounded-xl bg-ink px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-700 disabled:opacity-50; }
-  .input { @apply w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none transition focus:border-stone-400 focus:ring-2 focus:ring-stone-200; }
-  .label { @apply mb-1 block text-sm font-medium text-stone-600; }
-  .tabs { @apply inline-flex rounded-xl bg-stone-100/80 p-1; }
-  .tab { @apply rounded-lg px-3 py-1 text-sm text-stone-500 transition hover:text-stone-800; }
-  .tab-active { @apply bg-white text-ink shadow-card; }
-  .code { @apply block overflow-x-auto whitespace-pre rounded-xl bg-stone-900 p-4 font-mono text-[13px] leading-relaxed text-stone-100; }
+  .card { @apply rounded-xl border bg-card text-card-foreground shadow-card; }
+  .btn { @apply inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border bg-card px-3 text-sm font-medium shadow-card transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50; }
+  .btn-dark { @apply inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50; }
+  .input { @apply flex h-9 w-full rounded-lg border border-input bg-card px-3 py-1 text-sm shadow-card outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:border-ring; }
+  textarea.input { @apply h-auto py-2; }
+  .label { @apply mb-1.5 block text-sm font-medium text-stone-700; }
+  .tabs { @apply inline-flex items-center rounded-lg bg-muted p-1; }
+  .tab { @apply inline-flex h-7 items-center rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground; }
+  .tab-active { @apply bg-card text-foreground shadow-card; }
+  .code { @apply block overflow-x-auto whitespace-pre rounded-lg bg-stone-900 p-4 font-mono text-[13px] leading-relaxed text-stone-100; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
 }
