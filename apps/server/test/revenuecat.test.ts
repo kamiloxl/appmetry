@@ -4,7 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
 import type { AppRow, Env } from '../src/env';
 import { creditedSessionId, matchInstall } from '../src/credit';
-import { lifecycleEventName, rcHealth, type RcEvent } from '../src/revenuecat';
+import { lifecycleEventName, rcHealth, type RcEvent, rematch } from '../src/revenuecat';
 import { BASE, call, createApp, login } from './helpers';
 import { rcBody, rcEvent, type RcFixtureEvent, withInstallAttr } from './fixtures/rc';
 
@@ -173,6 +173,42 @@ describe('RevenueCat webhook: what gets stored', () => {
     expect(await payment(pos.id)).toMatchObject({ kind: 'refund', amount: -999 });
   });
 
+  it('refund ts is event_timestamp_ms when both timestamps are present; other payments use purchased_at_ms', async () => {
+    const { app, secret } = await setup();
+    const now = Date.now();
+    const refund = rcEvent({ type: 'CANCELLATION', cancel_reason: 'CUSTOMER_SUPPORT', price: -9.99, purchased_at_ms: now - 20 * DAY, event_timestamp_ms: now - HOUR });
+    await hook(app, secret, refund);
+    expect(await payment(refund.id)).toMatchObject({ kind: 'refund', ts: now - HOUR });
+    const buy = rcEvent({ purchased_at_ms: now - 2 * HOUR, event_timestamp_ms: now - HOUR });
+    await hook(app, secret, buy);
+    expect(await payment(buy.id)).toMatchObject({ kind: 'payment', ts: now - 2 * HOUR });
+  });
+
+  it('refund credit uses the refund time', async () => {
+    const { app, secret } = await setup();
+    const now = Date.now();
+    await addInstall(app, 'install-refund1');
+    await addSession(app, 'session-before1', 'install-refund1', now - 20 * DAY, 'Email');
+    await addSession(app, 'session-after-1', 'install-refund1', now - 5 * DAY, 'Paid');
+    const refund = withInstallAttr(
+      rcEvent({ type: 'CANCELLATION', cancel_reason: 'CUSTOMER_SUPPORT', price: -9.99, purchased_at_ms: now - 10 * DAY, event_timestamp_ms: now - HOUR }),
+      'install-refund1',
+    );
+    await hook(app, secret, refund);
+    expect(await payment(refund.id)).toMatchObject({ session_id: 'session-after-1' });
+  });
+
+  it("a refund's price_usd is negative and matches the amount", async () => {
+    const { app, secret } = await setup();
+    await addInstall(app, 'install-refund2');
+    const refund = withInstallAttr(rcEvent({ type: 'CANCELLATION', cancel_reason: 'CUSTOMER_SUPPORT', price: 9.99 }), 'install-refund2');
+    await hook(app, secret, refund);
+    const row = await lifecycle(app, refund.id);
+    expect(row).toMatchObject({ name: 'rc_refunded' });
+    expect(JSON.parse(row!.props as string).price_usd).toBe(-9.99);
+    expect((await payment(refund.id))!.amount).toBe(-999);
+  });
+
   it('CANCELLATION UNSUBSCRIBE stores no payment but an rc_subscription_cancelled event with props.reason', async () => {
     const { app, secret } = await setup();
     await addInstall(app, 'install-cancel-1');
@@ -201,7 +237,7 @@ describe('RevenueCat webhook: what gets stored', () => {
     const res = await hook(app, secret, ev);
     expect(res.status).toBe(200);
     expect(await payment(ev.id)).toMatchObject({ amount: 0, kind: 'payment' });
-    expect(JSON.parse((await lifecycle(app, ev.id))!.props as string).price_usd).toBeNull();
+    expect(JSON.parse((await lifecycle(app, ev.id))!.props as string).price_usd).toBe(0);
 
     const logged = JSON.stringify(spies.flatMap((s) => s.mock.calls));
     for (const secretBit of ['jane.doe@example.com', 'Jane Doe', secret, 'user-secret-77']) expect(logged).not.toContain(secretBit);
@@ -262,7 +298,14 @@ describe('RevenueCat lifecycle events', () => {
     const { app, secret } = await setup();
     const ev = rcEvent({ type: 'EXPIRATION', price: null });
     await hook(app, secret, ev);
-    expect(await rcRow(ev.id)).toMatchObject({ type: 'EXPIRATION', install_id: null, has_install_attr: 0 });
+    expect(await rcRow(ev.id)).toMatchObject({
+      type: 'EXPIRATION',
+      install_id: null,
+      has_install_attr: 0,
+      app_user_id: ev.app_user_id,
+      lifecycle_name: 'rc_subscription_expired',
+    });
+    expect(JSON.parse((await rcRow(ev.id))!.lifecycle_props as string)).toEqual({ product_id: 'pro_monthly', store: 'APP_STORE', price_usd: 0 });
     expect(await payment(ev.id)).toBeNull();
     expect(await count('SELECT COUNT(*) AS n FROM events WHERE app_id = ?', app.id)).toBe(0);
   });
@@ -479,7 +522,7 @@ describe('RevenueCat rematch', () => {
     expect((await call(`/api/apps/${app.id}/payments/rematch`, { method: 'POST' })).status).toBe(401);
     const res = await call(`/api/apps/${app.id}/payments/rematch`, { method: 'POST', cookie });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ matched: 1 });
+    expect(await res.json()).toEqual({ matched: 1, remaining: 0 });
 
     expect(await payment(ev.id)).toMatchObject({ install_id: 'install-late-01', matched_by: 'user_id' });
     expect(await rcRow(ev.id)).toMatchObject({ install_id: 'install-late-01' });
@@ -489,7 +532,95 @@ describe('RevenueCat rematch', () => {
 
     // Nothing left to match.
     const again = await call(`/api/apps/${app.id}/payments/rematch`, { method: 'POST', cookie });
-    expect(await again.json()).toEqual({ matched: 0 });
+    expect(await again.json()).toEqual({ matched: 0, remaining: 0 });
     expect((await call('/api/apps/no-such-app-000/payments/rematch', { method: 'POST', cookie })).status).toBe(404);
+  });
+
+  it('rematch only considers deliveries since sinceTs', async () => {
+    const { app, secret } = await setup();
+    const now = Date.now();
+    const old = rcEvent({ app_user_id: 'since-user-01', event_timestamp_ms: now - 10 * DAY, purchased_at_ms: now - 10 * DAY });
+    const recent = rcEvent({ app_user_id: 'since-user-01', event_timestamp_ms: now - DAY, purchased_at_ms: now - DAY });
+    await hook(app, secret, old);
+    await hook(app, secret, recent);
+    await addInstall(app, 'install-since-1', { user_id: 'since-user-01' });
+    expect(await rematch(env.DB, app.id, now - 7 * DAY)).toEqual({ matched: 1, remaining: 0 });
+    expect(await payment(recent.id)).toMatchObject({ install_id: 'install-since-1', matched_by: 'user_id' });
+    expect(await payment(old.id)).toMatchObject({ install_id: null, matched_by: 'none' });
+    expect(await rematch(env.DB, app.id, 0)).toEqual({ matched: 1, remaining: 0 });
+  });
+
+  it('rematch is isolated per app', async () => {
+    const { app, secret } = await setup();
+    const { app: other } = await setup();
+    const ev = rcEvent({ app_user_id: 'iso-user-0001' });
+    await hook(app, secret, ev);
+    await addInstall(other, 'install-iso-001', { user_id: 'iso-user-0001' });
+    await addInstall(other, 'iso-user-0001');
+    expect(await rematch(env.DB, app.id, 0)).toEqual({ matched: 0, remaining: 0 });
+    expect(await rematch(env.DB, other.id, 0)).toEqual({ matched: 0, remaining: 0 });
+    expect(await rcRow(ev.id)).toMatchObject({ install_id: null });
+  });
+
+  it("rematch sets the payment's session_id credit and matches app_user_id equal to an install id", async () => {
+    const { app, secret } = await setup();
+    const now = Date.now();
+    const ev = rcEvent({ app_user_id: 'install-cred-02', purchased_at_ms: now - HOUR });
+    await hook(app, secret, ev);
+    await addInstall(app, 'install-cred-02');
+    await addSession(app, 'session-cred-01', 'install-cred-02', now - DAY, 'Referral');
+    await addSession(app, 'session-cred-02', 'install-cred-02', now - 2 * HOUR, 'Direct');
+    expect(await rematch(env.DB, app.id, 0)).toEqual({ matched: 1, remaining: 0 });
+    expect(await payment(ev.id)).toMatchObject({ install_id: 'install-cred-02', matched_by: 'install_id', session_id: 'session-cred-01' });
+  });
+
+  it('rematch backfills a payment-less rc_trial_started with the exact name', async () => {
+    const { app, secret } = await setup();
+    const ev = rcEvent({ period_type: 'TRIAL', price: 0, app_user_id: 'trial-user-01' });
+    await hook(app, secret, ev);
+    expect(await payment(ev.id)).toBeNull();
+    await addInstall(app, 'install-trial-2', { user_id: 'trial-user-01' });
+    expect(await rematch(env.DB, app.id, 0)).toEqual({ matched: 1, remaining: 0 });
+    const row = await lifecycle(app, ev.id);
+    expect(row).toMatchObject({ name: 'rc_trial_started', install_id: 'install-trial-2', ts: ev.event_timestamp_ms, session_id: null });
+    expect(JSON.parse(row!.props as string)).toEqual({ product_id: 'pro_monthly', store: 'APP_STORE', price_usd: 0 });
+    expect(await rcRow(ev.id)).toMatchObject({ install_id: 'install-trial-2' });
+  });
+
+  it('rematch backfills rc_trial_converted with the exact name', async () => {
+    const { app, secret } = await setup();
+    const ev = rcEvent({ type: 'RENEWAL', is_trial_conversion: true, price: 7.99, app_user_id: 'conv-user-01' });
+    await hook(app, secret, ev);
+    await addInstall(app, 'install-conv-01', { user_id: 'conv-user-01' });
+    expect(await rematch(env.DB, app.id, 0)).toEqual({ matched: 1, remaining: 0 });
+    const row = await lifecycle(app, ev.id);
+    expect(row).toMatchObject({ name: 'rc_trial_converted' });
+    expect(JSON.parse(row!.props as string).price_usd).toBe(7.99);
+    expect(await payment(ev.id)).toMatchObject({ install_id: 'install-conv-01', renewal: 1 });
+  });
+
+  it('$RCAnonymousID: deliveries are never rematch candidates', async () => {
+    const { app, secret } = await setup();
+    const ev = rcEvent({ app_user_id: '$RCAnonymousID:abc123', original_app_user_id: '$RCAnonymousID:abc123', aliases: [] });
+    await hook(app, secret, ev);
+    // Even an install carrying that id is not linked by rematch.
+    await addInstall(app, 'install-anon-01', { user_id: '$RCAnonymousID:abc123' });
+    expect(await rematch(env.DB, app.id, 0)).toEqual({ matched: 0, remaining: 0 });
+    expect(await rcRow(ev.id)).toMatchObject({ install_id: null });
+  });
+
+  it('rematch respects the limit and reports remaining', async () => {
+    const { app, secret } = await setup();
+    const now = Date.now();
+    const evs = [3, 2, 1].map((h) => rcEvent({ app_user_id: 'limit-user-01', event_timestamp_ms: now - h * HOUR, purchased_at_ms: now - h * HOUR }));
+    for (const ev of evs) await hook(app, secret, ev);
+    await hook(app, secret, rcEvent({ type: 'TEST', app_user_id: 'limit-user-01' }));
+    await addInstall(app, 'install-limit-1', { user_id: 'limit-user-01' });
+    expect(await rematch(env.DB, app.id, 0, 2)).toEqual({ matched: 2, remaining: 1 });
+    // Oldest first.
+    expect(await payment(evs[0].id)).toMatchObject({ install_id: 'install-limit-1' });
+    expect(await payment(evs[2].id)).toMatchObject({ install_id: null });
+    expect(await rematch(env.DB, app.id, 0, 2)).toEqual({ matched: 1, remaining: 0 });
+    expect(await rematch(env.DB, app.id, 0, 2)).toEqual({ matched: 0, remaining: 0 });
   });
 });

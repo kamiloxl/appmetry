@@ -157,9 +157,13 @@ CREATE TABLE rc_events (
   type TEXT,
   environment TEXT,
   has_install_attr INTEGER NOT NULL DEFAULT 0,
-  install_id TEXT
+  install_id TEXT,
+  app_user_id TEXT, -- RevenueCat app_user_id, for "Try matching again" (rematch)
+  lifecycle_name TEXT, -- rc_* event name (spec §5 table), NULL for types that are only logged
+  lifecycle_props TEXT -- JSON props of that event, so rematch backfills it exactly
 );
 CREATE INDEX rc_events_ts ON rc_events (app_id, ts);
+CREATE INDEX rc_events_unmatched ON rc_events (app_id, install_id, ts);
 
 -- Wrong-password attempts for the per-IP lockout. No IP is stored: ip_hash is HMAC-SHA256(session key, IP), hex.
 -- Rows older than 15 minutes are purged on the next failure and by the daily cron.

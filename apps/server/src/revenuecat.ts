@@ -1,5 +1,5 @@
 import { type Context, Hono } from 'hono';
-import { creditedSessionId, installAttr, matchInstall, type MatchedBy } from './credit';
+import { creditedSessionId, creditSql, installAttr, matchInstall, type MatchedBy, userIdMatchSql } from './credit';
 import { type AppEnv, getAppById } from './env';
 import { readCapped } from './ingest';
 import { safeEqual, sha256Hex } from './lib/crypto';
@@ -80,14 +80,19 @@ export function lifecycleEventName(ev: RcEvent): string | null {
   }
 }
 
+/** USD cents for an event: `price` × 100, null as 0, refunds always negative. */
+function amountCents(ev: RcEvent): number {
+  const cents = Math.round((num(ev.price) ?? 0) * 100);
+  if (cents === 0) return 0;
+  return isRefund(ev) ? -Math.abs(cents) : cents;
+}
+
 /** The payments row values for revenue-bearing events, or null. Trial starts are events, not revenue. */
 function paymentFor(ev: RcEvent): { kind: 'payment' | 'refund'; amount: number; renewal: 0 | 1 } | null {
   const refund = isRefund(ev);
   if (!refund && !PAYMENT_TYPES.has(ev.type)) return null;
   if (ev.type === 'INITIAL_PURCHASE' && ev.period_type === 'TRIAL') return null;
-  const cents = Math.round((num(ev.price) ?? 0) * 100);
-  if (refund) return { kind: 'refund', amount: cents === 0 ? 0 : -Math.abs(cents), renewal: 0 };
-  return { kind: 'payment', amount: cents, renewal: ev.type === 'RENEWAL' ? 1 : 0 };
+  return { kind: refund ? 'refund' : 'payment', amount: amountCents(ev), renewal: ev.type === 'RENEWAL' ? 1 : 0 };
 }
 
 function lifecycleInsert(
@@ -97,14 +102,14 @@ function lifecycleInsert(
   installId: string,
   ts: number,
   name: string,
-  props: Record<string, unknown>,
+  propsJson: string,
 ): D1PreparedStatement {
   return db
     .prepare(
       `INSERT OR IGNORE INTO events (app_id, id, session_id, install_id, ts, type, name, props)
        VALUES (?, ?, NULL, ?, ?, 'event', ?, ?)`,
     )
-    .bind(appId, `rc_${eventId}`, installId, ts, name, JSON.stringify(props));
+    .bind(appId, `rc_${eventId}`, installId, ts, name, propsJson);
 }
 
 /** POST /api/webhooks/revenuecat/:appId. Public to the session guard; authenticates with the webhook secret. */
@@ -151,16 +156,22 @@ export async function handleRevenueCat(c: Context<AppEnv>): Promise<Response> {
   // 4. Match, credit and build the writes. TEST events (RevenueCat's "Send test event") are only logged.
   let installId: string | null = null;
   let matchedBy: MatchedBy = 'none';
+  let appUserId: string | null = null;
+  let lifecycleName: string | null = null;
+  let lifecycleProps: string | null = null;
   const statements: D1PreparedStatement[] = [];
   if (type !== 'TEST') {
     ({ installId, matchedBy } = await matchInstall(db, app.id, event));
-    const price = num(event.price);
+    appUserId = text(event.app_user_id);
     const productId = text(event.product_id);
     const store = text(event.store, 64);
 
     const pay = paymentFor(event);
     if (pay) {
-      const ts = num(event.purchased_at_ms) ?? num(event.event_timestamp_ms) ?? now;
+      // A refund is dated when it happened; a purchase when it was bought.
+      const evTs = num(event.event_timestamp_ms);
+      const purchasedTs = num(event.purchased_at_ms);
+      const ts = (pay.kind === 'refund' ? (evTs ?? purchasedTs) : (purchasedTs ?? evTs)) ?? now;
       const sessionId = installId ? await creditedSessionId(db, app.id, installId, ts) : null;
       statements.push(
         db
@@ -169,23 +180,30 @@ export async function handleRevenueCat(c: Context<AppEnv>): Promise<Response> {
                (id, app_id, ts, kind, amount, event_type, product_id, store, environment, app_user_id, install_id, session_id, matched_by, renewal)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
-          .bind(id, app.id, ts, pay.kind, pay.amount, type, productId, store, environment, text(event.app_user_id), installId, sessionId, matchedBy, pay.renewal),
+          .bind(id, app.id, ts, pay.kind, pay.amount, type, productId, store, environment, appUserId, installId, sessionId, matchedBy, pay.renewal),
       );
     }
 
-    const name = lifecycleEventName(event);
-    if (name && installId) {
-      const props: Record<string, unknown> = { product_id: productId, store, price_usd: price };
-      if (name === 'rc_subscription_cancelled') props.reason = text(event.cancel_reason, 64);
-      statements.push(lifecycleInsert(db, app.id, id, installId, rcTs, name, props));
+    // Name and props are kept on the rc_events row too, so a later rematch backfills exactly this event.
+    lifecycleName = lifecycleEventName(event);
+    if (lifecycleName) {
+      // price_usd follows the stored amount, so payments and events agree.
+      const props: Record<string, unknown> = { product_id: productId, store, price_usd: amountCents(event) / 100 };
+      if (lifecycleName === 'rc_subscription_cancelled') props.reason = text(event.cancel_reason, 64);
+      lifecycleProps = JSON.stringify(props);
+      if (installId) statements.push(lifecycleInsert(db, app.id, id, installId, rcTs, lifecycleName, lifecycleProps));
     }
   }
 
   // 5. One atomic batch: if any write fails nothing is stored, so RevenueCat's retry is processed in full.
   //    INSERT OR IGNORE keeps a concurrent duplicate delivery from writing twice.
   const logRow = db
-    .prepare('INSERT OR IGNORE INTO rc_events (id, app_id, ts, type, environment, has_install_attr, install_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, app.id, rcTs, type, environment, hasInstallAttr, installId);
+    .prepare(
+      `INSERT OR IGNORE INTO rc_events
+         (id, app_id, ts, type, environment, has_install_attr, install_id, app_user_id, lifecycle_name, lifecycle_props)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, app.id, rcTs, type, environment, hasInstallAttr, installId, appUserId, lifecycleName, lifecycleProps);
   let results: D1Result[];
   try {
     results = await db.batch([logRow, ...statements]);
@@ -221,67 +239,92 @@ export async function rcHealth(db: D1Database, appId: string, now: number): Prom
   };
 }
 
-/** Matched payments per D1 batch while rematching (up to three statements each). */
-const REMATCH_CHUNK = 25;
+/** Default and maximum number of rc_events one rematch call handles. */
+const REMATCH_LIMIT = 20;
+const REMATCH_MAX = 200;
 
 /**
- * Re-run matching for unmatched payments since `sinceTs` ("Try matching again"). The attribute is not stored, so
- * this uses the stored app_user_id (steps 2 and 3). A newly matched payment gets its install, credit and
- * lifecycle event, and its rc_events row its install. Returns how many payments were newly matched.
+ * Unmatched rc_events of the app that steps 2–3 of matching can now link: a non-anonymous app_user_id that equals an
+ * install's user_id or id, over `rc_events r`. Shared by the candidate query and the `remaining` count.
+ * Binds: app id, sinceTs.
  */
-export async function rematch(db: D1Database, appId: string, sinceTs: number): Promise<number> {
+const REMATCH_WHERE = `WHERE r.app_id = ? AND r.install_id IS NULL AND r.ts >= ? AND r.type != 'TEST'
+    AND r.app_user_id IS NOT NULL AND r.app_user_id NOT LIKE '$RCAnonymousID:%'
+    AND EXISTS (SELECT 1 FROM installs i WHERE i.app_id = r.app_id AND (i.user_id = r.app_user_id OR i.id = r.app_user_id))`;
+
+export interface RematchResult {
+  /** rc_events newly linked to an install in this call. */
+  matched: number;
+  /** Candidates still matchable after this call (call again to continue). */
+  remaining: number;
+}
+
+/**
+ * "Try matching again": links unmatched RevenueCat deliveries since `sinceTs` to installs that appeared later.
+ * The attribute is not stored, so this uses the stored app_user_id (matching steps 2 and 3). Each match sets
+ * rc_events.install_id, the payment's install, matched_by and credit (if the delivery was a payment), and inserts
+ * the lifecycle event from the stored name and props. At most `limit` deliveries per call, in a fixed number of
+ * queries: one read, one write batch, one count.
+ */
+export async function rematch(db: D1Database, appId: string, sinceTs: number, limit = REMATCH_LIMIT): Promise<RematchResult> {
+  const take = Math.min(Math.max(1, Math.floor(limit)), REMATCH_MAX);
   const { results } = await db
     .prepare(
-      `SELECT p.id, p.ts, p.kind, p.amount, p.event_type, p.product_id, p.store, p.app_user_id, r.ts AS rc_ts
-       FROM payments p LEFT JOIN rc_events r ON r.app_id = p.app_id AND r.id = p.id
-       WHERE p.app_id = ? AND p.install_id IS NULL AND p.ts >= ? AND p.app_user_id IS NOT NULL
-       ORDER BY p.ts, p.id`,
+      `WITH c AS (
+         SELECT r.id, r.ts, r.lifecycle_name, r.lifecycle_props, p.ts AS pay_ts,
+           (${userIdMatchSql('r.app_id', 'r.app_user_id')}) AS by_user,
+           (SELECT i.id FROM installs i WHERE i.app_id = r.app_id AND i.id = r.app_user_id) AS by_install
+         FROM rc_events r LEFT JOIN payments p ON p.app_id = r.app_id AND p.id = r.id
+         ${REMATCH_WHERE}
+         ORDER BY r.ts, r.id LIMIT ?
+       ), m AS (
+         SELECT c.*, COALESCE(c.by_user, c.by_install) AS install_id,
+           CASE WHEN c.by_user IS NOT NULL THEN 'user_id' ELSE 'install_id' END AS matched_by
+         FROM c
+       )
+       SELECT m.id, m.ts, m.lifecycle_name, m.lifecycle_props, m.pay_ts, m.install_id, m.matched_by,
+         CASE WHEN m.pay_ts IS NULL THEN NULL ELSE (${creditSql('?', 'm.install_id', 'm.pay_ts')}) END AS session_id
+       FROM m WHERE m.install_id IS NOT NULL`,
     )
-    .bind(appId, sinceTs)
+    .bind(appId, sinceTs, take, appId)
     .all<{
       id: string;
       ts: number;
-      kind: string;
-      amount: number;
-      event_type: string | null;
-      product_id: string | null;
-      store: string | null;
-      app_user_id: string;
-      rc_ts: number | null;
+      lifecycle_name: string | null;
+      lifecycle_props: string | null;
+      pay_ts: number | null;
+      install_id: string;
+      matched_by: MatchedBy;
+      session_id: string | null;
     }>();
 
-  // One group per matched payment; its first statement is the payments UPDATE.
-  const groups: D1PreparedStatement[][] = [];
-  for (const p of results) {
-    const { installId, matchedBy } = await matchInstall(db, appId, { id: p.id, type: p.event_type ?? '', app_user_id: p.app_user_id });
-    if (!installId) continue;
-    const sessionId = await creditedSessionId(db, appId, installId, p.ts);
-    const group = [
-      db
-        .prepare('UPDATE payments SET install_id = ?, matched_by = ?, session_id = ? WHERE app_id = ? AND id = ? AND install_id IS NULL')
-        .bind(installId, matchedBy, sessionId, appId, p.id),
-      db.prepare('UPDATE rc_events SET install_id = ? WHERE app_id = ? AND id = ? AND install_id IS NULL').bind(installId, appId, p.id),
-    ];
-    // Rebuild the lifecycle name from what the payment row keeps (period type and trial conversion are not stored).
-    const name = lifecycleEventName({ id: p.id, type: p.event_type ?? '', cancel_reason: p.kind === 'refund' ? 'CUSTOMER_SUPPORT' : null });
-    if (name) {
-      const props = { product_id: p.product_id, store: p.store, price_usd: p.amount / 100 };
-      group.push(lifecycleInsert(db, appId, p.id, installId, p.rc_ts ?? p.ts, name, props));
+  const statements: D1PreparedStatement[] = [];
+  const rcUpdates: number[] = [];
+  for (const r of results) {
+    rcUpdates.push(statements.length);
+    statements.push(
+      db.prepare('UPDATE rc_events SET install_id = ? WHERE app_id = ? AND id = ? AND install_id IS NULL').bind(r.install_id, appId, r.id),
+    );
+    if (r.pay_ts !== null) {
+      statements.push(
+        db
+          .prepare('UPDATE payments SET install_id = ?, matched_by = ?, session_id = ? WHERE app_id = ? AND id = ? AND install_id IS NULL')
+          .bind(r.install_id, r.matched_by, r.session_id, appId, r.id),
+      );
     }
-    groups.push(group);
+    if (r.lifecycle_name) {
+      statements.push(lifecycleInsert(db, appId, r.id, r.install_id, r.ts, r.lifecycle_name, r.lifecycle_props ?? '{}'));
+    }
   }
 
   let matched = 0;
-  for (let i = 0; i < groups.length; i += REMATCH_CHUNK) {
-    const chunk = groups.slice(i, i + REMATCH_CHUNK);
-    const res = await db.batch(chunk.flat());
-    let at = 0;
-    for (const group of chunk) {
-      matched += res[at].meta.changes;
-      at += group.length;
-    }
+  if (statements.length) {
+    const res = await db.batch(statements);
+    for (const i of rcUpdates) matched += res[i].meta.changes;
   }
-  return matched;
+  const remaining =
+    (await db.prepare(`SELECT COUNT(*) AS n FROM rc_events r ${REMATCH_WHERE}`).bind(appId, sinceTs).first<number>('n')) ?? 0;
+  return { matched, remaining };
 }
 
 // ---------- dashboard routes (login required by apiGuard)
@@ -291,7 +334,7 @@ export const revenuecatRoutes = new Hono<AppEnv>();
 revenuecatRoutes.post('/api/apps/:id/payments/rematch', async (c) => {
   const app = await getAppById(c.env.DB, c.req.param('id'));
   if (!app) return c.json({ error: 'not found' }, 404);
-  return c.json({ matched: await rematch(c.env.DB, app.id, 0) });
+  return c.json(await rematch(c.env.DB, app.id, 0));
 });
 
 revenuecatRoutes.get('/api/apps/:id/revenuecat/health', async (c) => {
