@@ -1,7 +1,9 @@
 {
   "name": "appdash",
   "private": true,
-  "engines": { "node": ">=22.12" },
+  "engines": {
+    "node": ">=22.12"
+  },
   "packageManager": "pnpm@12.16.1",
   "scripts": {
     "test": "pnpm -r test",
@@ -10,6 +12,7 @@
     "predev": "node scripts/ensure-dist.mjs && wrangler d1 migrations apply DB --local",
     "dev": "wrangler dev --port 8787",
     "seed": "node apps/server/scripts/seed-demo.mjs && wrangler d1 execute DB --local --file .wrangler/seed.sql",
+    "smoke": "node scripts/smoke.mjs",
     "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy"
   },
   "devDependencies": {

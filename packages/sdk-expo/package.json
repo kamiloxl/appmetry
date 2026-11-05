@@ -2,6 +2,7 @@
   "name": "@appdash/expo",
   "version": "0.1.0",
   "description": "appdash SDK for Expo apps: offline event queue, sessions and install attribution",
+  "author": "appdash contributors",
   "main": "build/index.js",
   "module": "build/index.mjs",
   "types": "build/index.d.ts",
@@ -44,11 +45,11 @@
     "attribution",
     "AppdashAttribution"
   ],
-  "repository": "https://github.com/appdash/appdash",
+  "repository": "https://github.com/OWNER/appdash",
   "bugs": {
-    "url": "https://github.com/appdash/appdash/issues"
+    "url": "https://github.com/OWNER/appdash/issues"
   },
-  "homepage": "https://github.com/appdash/appdash#readme",
+  "homepage": "https://github.com/OWNER/appdash#readme",
   "license": "MIT",
   "peerDependencies": {
     "@react-native-async-storage/async-storage": "*",
