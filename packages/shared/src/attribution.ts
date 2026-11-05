@@ -1,0 +1,113 @@
+import type { Platform } from './payload';
+import { classify, findKnownSource, type Channel } from './sources';
+import { touchFromQuery, type Touch } from './url';
+
+export type AttributionMethod = 'install_referrer' | 'search_ads' | 'deep_link' | 'reported' | 'organic';
+
+export interface InstallAttribution {
+  method: AttributionMethod;
+  source: string;
+  channel: Channel;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  utm_term: string | null;
+  utm_content: string | null;
+  ref: string | null;
+  click_id: string | null;
+  asa_campaign_id: number | null;
+  asa_adgroup_id: number | null;
+  asa_keyword_id: number | null;
+}
+
+export interface AdServicesResult {
+  attribution: boolean;
+  campaignId?: number;
+  adGroupId?: number;
+  keywordId?: number;
+}
+
+export interface LinkTouch extends Touch {
+  click_id: string;
+}
+
+export const METHOD_PRIORITY: Record<AttributionMethod, number> = {
+  install_referrer: 1,
+  search_ads: 2,
+  deep_link: 3,
+  reported: 4,
+  organic: 5,
+};
+
+function base(method: AttributionMethod, source: string, channel: Channel): InstallAttribution {
+  return {
+    method, source, channel,
+    utm_source: null, utm_medium: null, utm_campaign: null, utm_term: null, utm_content: null,
+    ref: null, click_id: null,
+    asa_campaign_id: null, asa_adgroup_id: null, asa_keyword_id: null,
+  };
+}
+
+function fromTouchWith(method: AttributionMethod, t: Touch): InstallAttribution {
+  const { source, channel } = classify({ utmSource: t.utm_source, utmMedium: t.utm_medium, ref: t.ref });
+  return {
+    ...base(method, source, channel),
+    utm_source: t.utm_source ?? null,
+    utm_medium: t.utm_medium ?? null,
+    utm_campaign: t.utm_campaign ?? null,
+    utm_term: t.utm_term ?? null,
+    utm_content: t.utm_content ?? null,
+    ref: t.ref ?? null,
+    click_id: t.click_id ?? null,
+  };
+}
+
+export function organic(platform: Platform): InstallAttribution {
+  return base('organic', platform === 'ios' ? 'App Store' : 'Google Play', 'Organic');
+}
+
+export function fromInstallReferrer(raw: string, link: LinkTouch | null): InstallAttribution | null {
+  const parsed = touchFromQuery(raw);
+  let t: Touch = parsed;
+  if (link) {
+    t = {
+      ...parsed,
+      utm_source: link.utm_source,
+      utm_medium: link.utm_medium,
+      utm_campaign: link.utm_campaign,
+      utm_term: link.utm_term,
+      utm_content: link.utm_content,
+      ref: link.ref,
+      click_id: link.click_id,
+    };
+  }
+  if (t.utm_source === 'google-play' && t.utm_medium === 'organic') return null;
+  const hasAny = [t.utm_source, t.utm_medium, t.utm_campaign, t.utm_term, t.utm_content, t.ref, t.click_id].some(Boolean);
+  if (!hasAny) return null;
+  return fromTouchWith('install_referrer', t);
+}
+
+export function fromAdServices(r: AdServicesResult): InstallAttribution | null {
+  if (!r.attribution) return null;
+  return {
+    ...base('search_ads', 'Apple Search Ads', 'Paid Search'),
+    asa_campaign_id: r.campaignId ?? null,
+    asa_adgroup_id: r.adGroupId ?? null,
+    asa_keyword_id: r.keywordId ?? null,
+  };
+}
+
+export function fromTouch(t: Touch, method: 'deep_link'): InstallAttribution {
+  return fromTouchWith(method, t);
+}
+
+export function fromReported(answer: string): InstallAttribution {
+  const known = findKnownSource(answer);
+  if (known) return base('reported', known.name, known.channel);
+  return base('reported', answer.trim().slice(0, 100), 'Referral');
+}
+
+export function mergeAttribution(current: InstallAttribution, candidate: InstallAttribution | null): InstallAttribution {
+  if (!candidate) return current;
+  return METHOD_PRIORITY[candidate.method] < METHOD_PRIORITY[current.method] ? candidate : current;
+}
