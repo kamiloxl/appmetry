@@ -14,6 +14,7 @@ import {
   setSession,
 } from './auth';
 import { appsRoutes } from './apps';
+import { linksRoutes } from './links';
 import type { AppEnv, Env } from './env';
 import { handleAttribution } from './attribution';
 import { handleBatch } from './ingest';
@@ -74,6 +75,7 @@ app.get('/api/auth/me', async (c) => c.json({ loggedIn: await isLoggedIn(c) }));
 // ---------- dashboard API (login required by apiGuard)
 
 app.route('/', appsRoutes);
+app.route('/', linksRoutes);
 
 // ---------- fallbacks
 
