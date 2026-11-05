@@ -42,45 +42,92 @@ function renderLabel(dim: string, value: string): ReactNode {
   }
 }
 
+function Skeleton() {
+  return (
+    <div className="space-y-1" aria-busy="true" aria-label="Loading">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <div key={i} className="h-10 animate-pulse rounded-lg bg-stone-100" style={{ width: `${100 - i * 12}%` }} />
+      ))}
+    </div>
+  );
+}
+
+/** One tab's rows. Mounted per tab (keyed), so each tab fetches on first selection and never shows another tab's rows. */
+function PanelBody({ appId, q, tab, reloadKey, onPick }: { appId: string; q: QueryState; tab: TabDef; reloadKey: number; onPick?: (dim: string, value: string) => void }) {
+  const [retry, setRetry] = useState(0);
+  const { data, loading, error } = useApi<BreakdownRow[]>(`/api/apps/${appId}/stats/breakdown?${toSearch(q)}&dim=${encodeURIComponent(tab.dim)}`, reloadKey + retry);
+  const max = Math.max(1, ...(data ?? []).map((r) => r.installs));
+  const active = q.filters[tab.dim];
+  const clickable = Boolean(tab.filterable && onPick);
+
+  if (error)
+    return (
+      <div className="p-3 text-sm text-red-600" role="alert">
+        {error}{' '}
+        <button className="btn ml-2" onClick={() => setRetry((n) => n + 1)}>
+          Retry
+        </button>
+      </div>
+    );
+  if (!data) return <Skeleton />;
+  if (data.length === 0) return <p className="p-6 text-center text-sm text-stone-400">No data for this period</p>;
+
+  return (
+    <div className={`space-y-1 ${loading ? 'opacity-60' : ''}`}>
+      {data.slice(0, 10).map((r) => {
+        const inner = (
+          <>
+            <span className="absolute inset-0 flex">
+              <span className="rounded-lg bg-installsSoft transition-all" style={{ width: `${(r.installs / max) * 100}%`, minWidth: r.installs ? 4 : 0 }} />
+            </span>
+            <span className="relative flex min-w-0 flex-1 items-center gap-2.5 px-3 text-left text-[15px]">{renderLabel(tab.dim, r.value)}</span>
+            <span className="relative flex shrink-0 items-center gap-3 pr-3 text-[15px] font-medium">
+              <span className="w-16 text-right text-sm font-normal text-revenue">{r.revenue !== 0 ? money(r.revenue) : ''}</span>
+              <span className="w-10 text-right">{number(r.installs)}</span>
+            </span>
+          </>
+        );
+        const cls = 'group relative flex h-10 w-full items-center rounded-lg';
+        return clickable ? (
+          <button
+            key={r.value}
+            type="button"
+            className={`${cls} hover:bg-stone-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-stone-400 ${active === r.value ? 'ring-2 ring-stone-300' : ''}`}
+            aria-pressed={active === r.value}
+            title={active === r.value ? `Remove filter ${r.value}` : `Filter by ${r.value}`}
+            onClick={() => onPick?.(tab.dim, r.value)}
+          >
+            {inner}
+          </button>
+        ) : (
+          <div key={r.value} className={cls}>
+            {inner}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Tabbed breakdown card (installs bars with revenue), fed by /api/apps/:id/stats/breakdown. */
 export function Panel({ appId, q, tabs, reloadKey = 0, onPick }: { appId: string; q: QueryState; tabs: TabDef[]; reloadKey?: number; onPick?: (dim: string, value: string) => void }) {
   const [active, setActive] = useState(tabs[0]!.dim);
   const tab = tabs.find((t) => t.dim === active)!;
-  const { data, loading, error } = useApi<BreakdownRow[]>(`/api/apps/${appId}/stats/breakdown?${toSearch(q)}&dim=${encodeURIComponent(active)}`, reloadKey);
-  const max = Math.max(1, ...(data ?? []).map((r) => r.installs));
-  const hasRevenue = (data ?? []).some((r) => r.revenue !== 0);
 
   return (
     <div className="card flex min-h-[420px] flex-col p-3">
       <div className="flex items-center justify-between gap-2 pb-3">
-        <div className="tabs overflow-x-auto">
+        <div className="tabs overflow-x-auto" role="tablist">
           {tabs.map((t) => (
-            <button key={t.dim} className={`tab whitespace-nowrap ${t.dim === active ? 'tab-active' : ''}`} onClick={() => setActive(t.dim)}>
+            <button key={t.dim} role="tab" aria-selected={t.dim === active} className={`tab whitespace-nowrap ${t.dim === active ? 'tab-active' : ''}`} onClick={() => setActive(t.dim)}>
               {t.label}
             </button>
           ))}
         </div>
         <span className="shrink-0 px-2 text-sm font-medium text-stone-600">Installs</span>
       </div>
-      <div className={`flex-1 space-y-1 ${loading && !data ? 'animate-pulse' : ''}`}>
-        {error && <p className="p-3 text-sm text-red-600">{error}</p>}
-        {data && data.length === 0 && <p className="p-6 text-center text-sm text-stone-400">No data for this period</p>}
-        {data?.slice(0, 10).map((r) => (
-          <div
-            key={r.value}
-            className={`group relative flex h-10 items-center rounded-lg ${tab.filterable && onPick ? 'cursor-pointer' : ''}`}
-            onClick={() => tab.filterable && onPick?.(tab.dim, r.value)}
-          >
-            <div className="absolute inset-0 flex">
-              <div className="rounded-lg bg-installsSoft transition-all" style={{ width: `${(r.installs / max) * 100}%`, minWidth: r.installs ? 4 : 0 }} />
-            </div>
-            <div className="relative flex min-w-0 flex-1 items-center gap-2.5 px-3 text-[15px]">{renderLabel(tab.dim, r.value)}</div>
-            <div className="relative flex shrink-0 items-center gap-3 pr-3 text-[15px] font-medium">
-              {hasRevenue && r.revenue !== 0 && <span className="text-sm font-normal text-revenue">{money(r.revenue)}</span>}
-              {number(r.installs)}
-            </div>
-          </div>
-        ))}
+      <div className="flex-1">
+        <PanelBody key={tab.dim} appId={appId} q={q} tab={tab} reloadKey={reloadKey} onPick={onPick} />
       </div>
     </div>
   );

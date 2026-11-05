@@ -39,3 +39,8 @@ export function number(n: number): string {
 export function dateLabel(ts: number): string {
   return new Intl.DateTimeFormat('en', { day: 'numeric', month: 'short', year: 'numeric' }).format(ts);
 }
+
+/** Relative change of `cur` against `prev` (0.12 = twelve percent up); null when `prev` is 0, so there is nothing to compare with. */
+export function pctChange(cur: number, prev: number): number | null {
+  return prev ? (cur - prev) / prev : null;
+}

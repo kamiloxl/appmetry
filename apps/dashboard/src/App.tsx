@@ -5,6 +5,7 @@ import { api } from './lib/api';
 import type { AppInfo, Me } from './lib/types';
 import { Apps } from './pages/Apps';
 import { Login } from './pages/Login';
+import { Overview } from './pages/Overview';
 
 /** Waits for /api/auth/me, then renders the shell. Anyone not logged in goes to /login and comes back after. */
 function RequireAuth() {
@@ -116,7 +117,7 @@ export function App() {
         {/* Instance setup wizard (spec 6a), built in Task 25. */}
         <Route path="/setup" element={<ComingSoon title="Setup wizard coming soon" back={{ to: '/', label: 'Back to your apps' }} />} />
         <Route path="/apps/:id" element={<AppLayout />}>
-          <Route index element={<Back title="Overview coming soon" />} />
+          <Route index element={<Overview />} />
           <Route path="customers" element={<Back title="Customers coming soon" />} />
           <Route path="links" element={<Back title="Links coming soon" />} />
           <Route path="settings" element={<Back title="Settings coming soon" />} />
