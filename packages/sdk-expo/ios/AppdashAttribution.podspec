@@ -8,7 +8,8 @@ Pod::Spec.new do |s|
   s.summary        = package['description']
   s.description    = package['description']
   s.license        = package['license']
-  s.author         = package['author']
+  # CocoaPods requires an author; package.json has none, so fall back to the project name.
+  s.author         = package['author'] || 'appdash contributors'
   s.homepage       = package['homepage']
   s.platforms      = {
     :ios => '16.4'
