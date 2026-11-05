@@ -119,7 +119,6 @@ describe('password login', () => {
   it('SDK and webhook routes are not blocked by auth', async () => {
     for (const [method, path] of [
       ['POST', '/api/v1/batch'],
-      ['GET', '/api/v1/attribution'],
       ['OPTIONS', '/api/v1/batch'],
       ['POST', '/api/webhooks/revenuecat/app1'],
     ]) {
@@ -128,6 +127,9 @@ describe('password login', () => {
       // Implemented routes answer for themselves (400 for an empty batch, 204 for CORS preflight); the rest are 404/405.
       expect([204, 400, 404, 405], `${method} ${path}`).toContain(res.status);
     }
+    // The attribution route authenticates with the app key itself: its 401 is its own, not the session guard's.
+    const attr = await call('/api/v1/attribution?iid=whatever-1', { method: 'GET' });
+    expect(await attr.json()).toEqual({ error: 'unknown_app_key' });
   });
 
   it('rejects a tampered cookie', async () => {

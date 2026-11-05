@@ -246,7 +246,7 @@ describe('POST /api/v1/batch', () => {
     expect(await eventCount(app)).toBe(5);
   });
 
-  it('calls onInstall once per newly inserted install event', async () => {
+  it('calls onInstall for every install event, including retries of stored ones', async () => {
     const app = await createApp(cookie);
     const calls: Array<[string, string]> = [];
     const onInstall = async (installId: string, e: SdkEvent) => {
@@ -256,7 +256,7 @@ describe('POST /api/v1/batch', () => {
     const batch = { context: context() as never, events: [inst, ev('screen', { name: 'Home' })] };
     await ingestBatch(env.DB, app, batch, GEO, Date.now(), onInstall);
     await ingestBatch(env.DB, app, batch, GEO, Date.now(), onInstall);
-    expect(calls).toEqual([['install-0001', inst.id]]);
+    expect(calls).toEqual([['install-0001', inst.id], ['install-0001', inst.id]]);
   });
 
   it('drops events outside ts clamp', async () => {
@@ -398,7 +398,7 @@ describe('POST /api/v1/batch', () => {
     expect(res).toEqual({ inserted: 0, dropped: 0 });
     expect(await install(app)).toMatchObject({ attribution_method: 'deep_link', source: 'Google', utm_campaign: 'c1' });
 
-    // A retry of an install batch never fires onInstall again, even though attribution is re-derived.
+    // A retry of an install batch fires onInstall again (R16: the hook is idempotent).
     const inst = ev('install', { at: -6000, sid: 'session-0003' });
     await ingestBatch(env.DB, app, { context: context() as never, events: [inst] }, GEO, Date.now(), async (_iid, e) => {
       calls.push(e.id);
@@ -406,7 +406,7 @@ describe('POST /api/v1/batch', () => {
     await ingestBatch(env.DB, app, { context: context() as never, events: [inst, link] }, GEO, Date.now(), async (_iid, e) => {
       calls.push(e.id);
     });
-    expect(calls).toEqual([inst.id]);
+    expect(calls).toEqual([inst.id, inst.id]);
   });
 
   it('exit_screen tracks the latest screen by ts', async () => {

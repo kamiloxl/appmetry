@@ -14,6 +14,7 @@ import {
   type InstallAttribution,
   type SdkEvent,
 } from '@appdash/shared';
+import { sanitizeInstallProps, makeOnInstall } from './attribution';
 import { getAppByKey, type AppEnv, type AppRow } from './env';
 
 /** City-level location from `request.cf`. Nothing else about the request is stored (spec §7). */
@@ -23,7 +24,10 @@ export interface Geo {
   city: string | null;
 }
 
-/** Hook for Task 7: called once per `install` event that this batch newly inserted, after the batch is committed. */
+/**
+ * Called for every valid `install` event in a batch, new or already stored, after the batch is committed.
+ * Retries therefore re-run it: implementations must be idempotent.
+ */
 export type OnInstall = (installId: string, ev: SdkEvent) => Promise<void>;
 
 const noopOnInstall: OnInstall = async () => {};
@@ -121,7 +125,9 @@ export async function handleBatch(c: Context<AppEnv>): Promise<Response> {
   if (!v.ok) return fail({ status: 400, error: v.error });
   if (!bundleMatches(app, v.batch)) return fail({ status: 403, error: 'bundle_id_mismatch' });
 
-  const result = await ingestBatch(c.env.DB, app, v.batch, geoFrom(c.req.raw), Date.now());
+  const now = Date.now();
+  const onInstall = makeOnInstall(c.env.DB, app, c.executionCtx.waitUntil.bind(c.executionCtx), now);
+  const result = await ingestBatch(c.env.DB, app, v.batch, geoFrom(c.req.raw), now, onInstall);
   return c.json({ inserted: result.inserted, dropped: result.dropped + v.dropped }, 202);
 }
 
@@ -140,21 +146,27 @@ const orNull = (s: string) => (s ? s : null);
 function storedEvent(e: SdkEvent): { name: string | null; props: string | null } {
   if (e.type === 'identify') return { name: null, props: null };
   const name = e.name === undefined ? null : e.type === 'deep_link' ? stripPrivateParams(e.name) : e.name;
+  if (e.type === 'install' && e.props) {
+    // The AdServices token is a credential: it never reaches `events.props`. The referrer loses private params.
+    const props = sanitizeInstallProps(e.props);
+    return { name, props: Object.keys(props).length ? JSON.stringify(props) : null };
+  }
   return { name, props: e.props ? JSON.stringify(e.props) : null };
 }
 
-const ATTRIBUTION_COLUMNS = [
+export const ATTRIBUTION_COLUMNS = [
   'source', 'channel', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref', 'click_id',
   'asa_campaign_id', 'asa_adgroup_id', 'asa_keyword_id',
 ] as const;
 
 function attributionValues(a: InstallAttribution): Array<string | number | null> {
-  return [a.method, ...ATTRIBUTION_COLUMNS.map((k) => a[k])];
+  // The asa_* columns are TEXT: bind ids as strings, or D1 stores them as REAL ("22.0").
+  return [a.method, ...ATTRIBUTION_COLUMNS.map((k) => (k.startsWith('asa_') && a[k] !== null ? String(a[k]) : a[k]))];
 }
 
-type InstallAttrRow = Record<(typeof ATTRIBUTION_COLUMNS)[number], string | null> & { attribution_method: string | null };
+export type InstallAttrRow = Record<(typeof ATTRIBUTION_COLUMNS)[number], string | null> & { attribution_method: string | null };
 
-function rowToAttribution(row: InstallAttrRow): InstallAttribution {
+export function rowToAttribution(row: InstallAttrRow): InstallAttribution {
   const num = (v: string | null) => (v === null || v === '' ? null : Number(v));
   return {
     method: (row.attribution_method ?? 'organic') as AttributionMethod,
@@ -246,6 +258,7 @@ export async function ingestBatch(
   const fresh = events.filter((e) => !known.has(e.id));
   if (!fresh.length) {
     // Everything is stored already, but a previous attempt may have died before the attribution follow-up.
+    await runOnInstall(onInstall, iid, events);
     await upgradeAttribution(db, app.id, iid, events);
     return { inserted: 0, dropped };
   }
@@ -354,16 +367,8 @@ export async function ingestBatch(
   const results = await db.batch(stmts);
   const inserted = fresh.filter((e) => (results[eventStmtAt.get(e.id)!].meta.changes ?? 0) > 0);
 
-  // 7a. Install hook (Task 7), once per newly inserted install event, after commit.
-  for (const e of inserted) {
-    if (e.type !== 'install') continue;
-    try {
-      await onInstall(iid, e);
-    } catch (err) {
-      // The events are committed; a retry would be deduplicated, so failing the request would not help.
-      console.error('onInstall failed', err instanceof Error ? err.message : 'unknown error');
-    }
-  }
+  // 7a. Install hook, for every install event in the batch (retries included; the hook is idempotent).
+  await runOnInstall(onInstall, iid, events);
 
   // 7b. Attribution upgrades from every valid event in the batch, not only new ones: if a previous attempt
   // committed and then died, its retry still applies the upgrade. mergeAttribution makes this idempotent.
@@ -372,18 +377,23 @@ export async function ingestBatch(
   return { inserted: inserted.length, dropped };
 }
 
+async function runOnInstall(onInstall: OnInstall, iid: string, events: SdkEvent[]): Promise<void> {
+  for (const e of events) {
+    if (e.type !== 'install') continue;
+    try {
+      await onInstall(iid, e);
+    } catch (err) {
+      // The events are committed; a retry runs the hook again, so failing the request would not help.
+      console.error('onInstall failed', err instanceof Error ? err.message : 'unknown error');
+    }
+  }
+}
+
 /** Apply a reported source, or a deep link in the install's earliest session, when it beats the current method. */
 async function upgradeAttribution(db: D1Database, appId: string, iid: string, events: SdkEvent[]): Promise<void> {
   const sources = events.filter((e) => e.type === 'source' && e.name && e.name.trim());
   const links = deepLinkTouches(events);
   if (!sources.length && !links.length) return;
-
-  const row = await db
-    .prepare(`SELECT attribution_method, ${ATTRIBUTION_COLUMNS.join(', ')} FROM installs WHERE app_id = ? AND id = ?`)
-    .bind(appId, iid)
-    .first<InstallAttrRow>();
-  if (!row) return;
-  const current = rowToAttribution(row);
 
   const candidates: Array<{ ts: number; a: InstallAttribution }> = sources.map((e) => ({ ts: e.ts, a: fromReported(e.name!) }));
   if (links.length) {
@@ -396,17 +406,35 @@ async function upgradeAttribution(db: D1Database, appId: string, iid: string, ev
     }
   }
   candidates.sort((x, y) => x.ts - y.ts);
+  await mergeIntoInstall(db, appId, iid, candidates.map((c) => c.a));
+}
 
-  let merged = current;
-  for (const { a } of candidates) merged = mergeAttribution(merged, a);
-  if (merged.method === current.method) return;
+/**
+ * Merge candidates (in order) into the install's stored attribution; a stronger method wins (mergeAttribution).
+ * The write is guarded on the method that was read, so a concurrent stronger attribution (e.g. AdServices) is never
+ * overwritten; on a lost race the row is re-read and merged again.
+ */
+export async function mergeIntoInstall(
+  db: D1Database, appId: string, iid: string, candidates: Array<InstallAttribution | null>,
+): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const row = await db
+      .prepare(`SELECT attribution_method, ${ATTRIBUTION_COLUMNS.join(', ')} FROM installs WHERE app_id = ? AND id = ?`)
+      .bind(appId, iid)
+      .first<InstallAttrRow>();
+    if (!row) return;
+    const current = rowToAttribution(row);
+    let merged = current;
+    for (const a of candidates) merged = mergeAttribution(merged, a);
+    if (merged.method === current.method) return;
 
-  // Guarded on the method we read, so a concurrent stronger attribution (e.g. AdServices) is never overwritten.
-  await db
-    .prepare(
-      `UPDATE installs SET attribution_method = ?, ${ATTRIBUTION_COLUMNS.map((k) => `${k} = ?`).join(', ')}
-       WHERE app_id = ? AND id = ? AND attribution_method IS ?`,
-    )
-    .bind(...attributionValues(merged), appId, iid, row.attribution_method)
-    .run();
+    const res = await db
+      .prepare(
+        `UPDATE installs SET attribution_method = ?, ${ATTRIBUTION_COLUMNS.map((k) => `${k} = ?`).join(', ')}
+         WHERE app_id = ? AND id = ? AND attribution_method IS ?`,
+      )
+      .bind(...attributionValues(merged), appId, iid, row.attribution_method)
+      .run();
+    if ((res.meta.changes ?? 0) > 0) return;
+  }
 }

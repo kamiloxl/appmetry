@@ -15,6 +15,7 @@ import {
 } from './auth';
 import { appsRoutes } from './apps';
 import type { AppEnv, Env } from './env';
+import { handleAttribution } from './attribution';
 import { handleBatch } from './ingest';
 import { passwordsMatch } from './lib/crypto';
 
@@ -29,6 +30,7 @@ app.use('/api/*', apiGuard);
 // ---------- SDK ingestion (public to apiGuard; authenticates with X-App-Key)
 
 app.post('/api/v1/batch', handleBatch);
+app.get('/api/v1/attribution', handleAttribution);
 
 // ---------- login
 

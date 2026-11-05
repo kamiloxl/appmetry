@@ -109,3 +109,17 @@ export function mergeAttribution(current: InstallAttribution, candidate: Install
   if (!candidate) return current;
   return METHOD_PRIORITY[candidate.method] < METHOD_PRIORITY[current.method] ? candidate : current;
 }
+
+/** GET /api/v1/attribution?iid=… response. `resolved` is false while an Apple Search Ads token is still pending. */
+export interface AttributionResponse {
+  resolved: boolean;
+  method: AttributionMethod;
+  source: string;
+  channel: Channel;
+  utm_campaign: string | null;
+  utm_content: string | null;
+  utm_term: string | null;
+  asa_campaign_id: number | null;
+  asa_adgroup_id: number | null;
+  asa_keyword_id: number | null;
+}
