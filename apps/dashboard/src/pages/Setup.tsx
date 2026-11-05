@@ -57,10 +57,10 @@ function Progress({ status, step }: { status: SetupStatus | null; step: SetupSte
 // ---------- step 1
 
 const STORE_FIELDS = [
-  ['ios_bundle_id', 'iOS bundle id', 'com.example.app', 'text'],
-  ['android_package', 'Android package', 'com.example.app', 'text'],
-  ['app_store_url', 'App Store URL', 'https://apps.apple.com/app/id…', 'url'],
-  ['play_store_url', 'Google Play URL', 'https://play.google.com/store/apps/details?id=…', 'url'],
+  ['ios_bundle_id', 'iOS bundle id', 'com.example.app', 'text', undefined],
+  ['android_package', 'Android package', 'com.example.app', 'text', undefined],
+  ['app_store_url', 'App Store URL', 'https://apps.apple.com/app/id…', 'url', 'Before release, a public TestFlight link (testflight.apple.com/join/…) works too.'],
+  ['play_store_url', 'Google Play URL', 'https://play.google.com/store/apps/details?id=…', 'url', undefined],
 ] as const;
 
 type StoreKey = (typeof STORE_FIELDS)[number][0];
@@ -101,8 +101,8 @@ function StepApp({ app, onSaved }: { app: AppInfo | null; onSaved: (a: AppInfo) 
         <Field label="App name *">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} required placeholder="My app" autoFocus />
         </Field>
-        {STORE_FIELDS.map(([k, label, ph, type]) => (
-          <Field key={k} label={label}>
+        {STORE_FIELDS.map(([k, label, ph, type, hint]) => (
+          <Field key={k} label={label} hint={hint}>
             <input className="input" type={type} value={f[k]} onChange={(e) => setF((x) => ({ ...x, [k]: e.target.value }))} maxLength={type === 'url' ? 500 : 255} placeholder={ph} />
           </Field>
         ))}

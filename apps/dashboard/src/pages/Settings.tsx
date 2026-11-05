@@ -108,7 +108,7 @@ function StoresSection({ app, onSaved }: { app: AppInfo; onSaved: (a: AppInfo) =
           <Field label="Android package">
             <input className="input" value={f.android_package} onChange={set('android_package')} maxLength={255} placeholder="com.example.app" />
           </Field>
-          <Field label="App Store URL">
+          <Field label="App Store URL" hint="Before release, a public TestFlight link (testflight.apple.com/join/…) works too.">
             <input className="input" type="url" value={f.app_store_url} onChange={set('app_store_url')} maxLength={500} placeholder="https://apps.apple.com/app/id…" />
           </Field>
           <Field label="Google Play URL">
