@@ -35,18 +35,30 @@ export interface Totals {
   conversionRate: number;
   revenuePerInstall: number;
   avgSessionMs: number;
+  /** Installs that started a RevenueCat trial in the period. */
+  trials: number;
+  /** Installs whose trial converted to paid in the period. */
+  trialsConverted: number;
+  /** trials / installs of the period. */
+  trialRate: number;
 }
 
 export interface Overview {
   current: Totals;
   previous: Totals;
-  series: { label: string; installs: number; revenue: number }[];
+  series: { label: string; installs: number; revenue: number; trials: number }[];
 }
 
 export interface BreakdownRow {
   value: string;
   installs: number;
   revenue: number;
+  /** Installs that started a trial in the range; 0 for screen / event. */
+  trials: number;
+  /** Installs whose trial converted to paid in the range; 0 for screen / event. */
+  trialsConverted: number;
+  /** Search Ads name for the id in `value`, when known. */
+  label?: string;
 }
 
 /** GET /api/apps/:id/stats/customers row. `total` is USD cents with refunds netted; source and channel may be null. */

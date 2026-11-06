@@ -294,6 +294,16 @@ describe('RevenueCat lifecycle events', () => {
     expect(JSON.parse(row!.props as string)).toEqual({ product_id: 'pro_monthly', store: 'PLAY_STORE', price_usd: 19.99 });
   });
 
+  it('a sandbox lifecycle event carries props.sandbox so stats can drop it', async () => {
+    const { app, secret } = await setup();
+    await addInstall(app, 'install-life-sbx');
+    const ev = withInstallAttr(rcEvent({ period_type: 'TRIAL', price: 0, environment: 'SANDBOX' }), 'install-life-sbx');
+    await hook(app, secret, ev);
+    const row = await lifecycle(app, ev.id);
+    expect(row).toMatchObject({ name: 'rc_trial_started' });
+    expect(JSON.parse(row!.props as string)).toEqual({ product_id: 'pro_monthly', store: 'APP_STORE', price_usd: 0, sandbox: true });
+  });
+
   it('unmatched event writes rc_events only', async () => {
     const { app, secret } = await setup();
     const ev = rcEvent({ type: 'EXPIRATION', price: null });

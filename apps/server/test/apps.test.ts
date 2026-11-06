@@ -95,12 +95,13 @@ describe('apps API', () => {
         env.DB.prepare('INSERT INTO link_clicks (id, link_id, app_id, ts) VALUES (?, ?, ?, 1)').bind('c' + id, 'l' + id, id),
         env.DB.prepare('INSERT INTO payments (id, app_id, ts, kind) VALUES (?, ?, 1, ?)').bind('p' + id, id, 'payment'),
         env.DB.prepare('INSERT INTO rc_events (id, app_id, ts) VALUES (?, ?, 1)').bind('r' + id, id),
+        env.DB.prepare("INSERT INTO asa_names (app_id, kind, id, name, updated_at) VALUES (?, 'keyword', '1', 'k', 1)").bind(id),
       ]);
     }
     const res = await call(`/api/apps/${app.id}`, { method: 'DELETE', cookie });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    for (const t of ['apps', 'installs', 'sessions', 'events', 'links', 'link_clicks', 'payments', 'rc_events']) {
+    for (const t of ['apps', 'installs', 'sessions', 'events', 'links', 'link_clicks', 'payments', 'rc_events', 'asa_names']) {
       const col = t === 'apps' ? 'id' : 'app_id';
       expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ${col} = ?`).bind(app.id).first('n'), t).toBe(0);
       expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ${col} = ?`).bind(other.id).first('n'), `${t} other`).toBe(1);

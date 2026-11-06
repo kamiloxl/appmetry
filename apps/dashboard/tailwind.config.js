@@ -14,6 +14,7 @@ export default {
         installsInk: '#5a9be0',
         revenue: '#e07b5f',
         revenueSoft: '#fadbd1',
+        trials: '#8e6bd8',
         // shadcn/ui semantic tokens, defined in styles.css on top of the same palette.
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',

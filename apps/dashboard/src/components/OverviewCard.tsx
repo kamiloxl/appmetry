@@ -22,17 +22,18 @@ const KPIS: { key: keyof Totals; label: string; format: (v: number) => string; d
   { key: 'activeUsers', label: 'Active users', format: number },
   { key: 'sessions', label: 'Sessions', format: number },
   { key: 'revenue', label: 'Revenue', format: money, dot: 'bg-revenue' },
+  { key: 'trials', label: 'Trials', format: number },
   { key: 'conversionRate', label: 'Conversion', format: (v) => `${(v * 100).toFixed(v >= 0.1 ? 0 : 1)}%` },
   { key: 'revenuePerInstall', label: 'Revenue/install', format: money },
   { key: 'avgSessionMs', label: 'Avg session', format: duration },
 ];
 
-/** The seven KPIs of the Overview page as one strip, each with its change against the previous period. */
+/** The eight KPIs of the Overview page as one strip, each with its change against the previous period. */
 export function OverviewCard({ data, stale = false }: { data: Overview | null; stale?: boolean }) {
   return (
     <section className={cn('card overflow-hidden transition-opacity', stale && 'opacity-60')} aria-busy={stale || !data} aria-label="Key metrics">
       {/* Cells draw their right and bottom borders; the negative margin tucks the outer ones under the card edge. */}
-      <div className="-mb-px -mr-px grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7">
+      <div className="-mb-px -mr-px grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8">
         {KPIS.map((k) => (
           <div key={k.key} className="min-w-0 border-b border-r px-4 py-3.5" data-testid={data ? `card-${k.key}` : undefined}>
             <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">

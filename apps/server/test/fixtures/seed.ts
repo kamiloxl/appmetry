@@ -22,16 +22,20 @@ interface InstallRow {
   channel: string;
   utm_campaign?: string;
   asa_campaign_id?: string;
+  asa_adgroup_id?: string;
+  asa_keyword_id?: string;
   first_seen: number;
 }
 
 export function insertInstall(db: D1Database, appId: string, r: InstallRow) {
   return db
     .prepare(
-      `INSERT INTO installs (app_id, id, platform, first_seen, last_seen, app_version, os_version, device_model, country, source, channel, utm_campaign, asa_campaign_id)
-       VALUES (?, ?, ?, ?, ?, '1.0.0', '17.0', 'Phone1', ?, ?, ?, ?, ?)`,
+      `INSERT INTO installs (app_id, id, platform, first_seen, last_seen, app_version, os_version, device_model, country, source, channel, utm_campaign,
+                            asa_campaign_id, asa_adgroup_id, asa_keyword_id)
+       VALUES (?, ?, ?, ?, ?, '1.0.0', '17.0', 'Phone1', ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(appId, r.id, r.platform, r.first_seen, r.first_seen, r.country, r.source, r.channel, r.utm_campaign ?? null, r.asa_campaign_id ?? null);
+    .bind(appId, r.id, r.platform, r.first_seen, r.first_seen, r.country, r.source, r.channel, r.utm_campaign ?? null,
+          r.asa_campaign_id ?? null, r.asa_adgroup_id ?? null, r.asa_keyword_id ?? null);
 }
 
 export function insertSession(
@@ -58,10 +62,14 @@ export function insertPayment(
     .bind(r.id, appId, r.ts, r.kind ?? (r.amount < 0 ? 'refund' : 'payment'), r.amount, r.environment ?? 'PRODUCTION', r.install_id ?? null, r.session_id ?? null);
 }
 
-export function insertEvent(db: D1Database, appId: string, r: { id: string; install_id: string; ts: number; type: string; name: string }) {
+export function insertEvent(
+  db: D1Database,
+  appId: string,
+  r: { id: string; install_id: string; ts: number; type: string; name: string; props?: Record<string, unknown> },
+) {
   return db
-    .prepare(`INSERT INTO events (app_id, id, session_id, install_id, ts, type, name) VALUES (?, ?, NULL, ?, ?, ?, ?)`)
-    .bind(appId, r.id, r.install_id, r.ts, r.type, r.name);
+    .prepare(`INSERT INTO events (app_id, id, session_id, install_id, ts, type, name, props) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)`)
+    .bind(appId, r.id, r.install_id, r.ts, r.type, r.name, r.props ? JSON.stringify(r.props) : null);
 }
 
 /**

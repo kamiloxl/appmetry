@@ -15,7 +15,9 @@ export { toggleFilter };
 
 const f = (label: string, dim: string): TabDef => ({ label, dim, filterable: true });
 const GROUPS: TabDef[][] = [
-  [f('Channel', 'channel'), f('Source', 'source'), f('Campaign', 'campaign'), f('Search Ads', 'asa_campaign_id')],
+  [f('Channel', 'channel'), f('Source', 'source'), f('Campaign', 'campaign')],
+  // Apple Search Ads (AdServices) gives ids only, no names.
+  [f('Search Ads campaign', 'asa_campaign_id'), f('Ad group', 'asa_adgroup_id'), f('Keyword', 'asa_keyword_id')],
   [f('Platform', 'platform'), f('Country', 'country'), f('App version', 'app_version'), f('OS', 'os_version'), f('Device', 'device_model')],
   // The server ignores screen and event as filters, so these rows are plain.
   [
@@ -29,9 +31,17 @@ export function Overview() {
   const [q, update] = useQueryState();
   const [reloadKey, setReloadKey] = useState(0);
   const [retry, setRetry] = useState(0);
+  // Display names of picked filter values (Search Ads names), by dimension. Lost on reload; the chip then shows the id.
+  const [labels, setLabels] = useState<Record<string, string>>({});
   const { data, error, loading } = useApi<OverviewData>(`/api/apps/${id}/stats/overview?${toSearch(q)}`, reloadKey + retry);
 
-  const pick = (dim: string, value: string) => update({ filters: toggleFilter(q.filters, dim, value) });
+  const pick = (dim: string, value: string, label?: string) => {
+    setLabels((l) => {
+      const { [dim]: _, ...rest } = l;
+      return label ? { ...rest, [dim]: label } : rest;
+    });
+    update({ filters: toggleFilter(q.filters, dim, value) });
+  };
   const remove = (dim: string) => {
     const filters = { ...q.filters };
     delete filters[dim];
@@ -41,7 +51,7 @@ export function Overview() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <FilterBar filters={q.filters} onRemove={remove} hint="Click a row in any breakdown to filter" />
+        <FilterBar filters={q.filters} labels={labels} onRemove={remove} hint="Click a row in any breakdown to filter" />
         <Toolbar q={q} update={update} onRefresh={() => setReloadKey((k) => k + 1)} loading={loading} />
       </div>
       {error ? (

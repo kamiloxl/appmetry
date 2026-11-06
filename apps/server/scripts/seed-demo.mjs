@@ -32,7 +32,7 @@ function insert(table, cols, rows) {
 }
 
 // ---------- reset (every table with an app_id column, then the app)
-for (const t of ['events', 'sessions', 'installs', 'link_clicks', 'links', 'payments', 'rc_events']) out.push(`DELETE FROM ${t} WHERE app_id = '${APP_ID}';`);
+for (const t of ['events', 'sessions', 'installs', 'link_clicks', 'links', 'payments', 'rc_events', 'asa_names']) out.push(`DELETE FROM ${t} WHERE app_id = '${APP_ID}';`);
 out.push(`DELETE FROM apps WHERE id = '${APP_ID}';`);
 
 insert(
@@ -71,13 +71,29 @@ const ANDROID_DEVICES = ['Pixel 8', 'SM-S918B', 'SM-A546B', 'Pixel 7a', 'M2101K6
 const IOS_VERSIONS = ['17.5', '18.0', '18.1', '26.0'];
 const ANDROID_VERSIONS = ['13', '14', '15'];
 const APP_VERSIONS = [['1.2.0', 6], ['1.1.0', 3], ['1.0.3', 1]];
+// Apple Search Ads: 3 campaigns, 5 ad groups, 13 keywords of a sleep and meditation app. AdServices reports ids
+// only; the names go to asa_names. `w` is the keyword's share of Search Ads installs, `t` scales its trial rate and
+// `c` its trial-to-paid rate, so keywords differ: brand and "insomnia help" convert well, "white noise" brings volume
+// but few trials.
+const ASA_CAMPAIGNS = { 1234500001: 'Brand – Exact', 1234500002: 'Category – Sleep', 1234500003: 'Category – Meditation' };
+const ASA_ADGROUPS = { 2234500001: 'Brand', 2234500002: 'Sleep sounds', 2234500003: 'Sleep aid', 2234500004: 'Meditation', 2234500005: 'Anxiety & stress' };
 const ASA = [
-  { campaign: '1234500001', adgroup: '2234500001', keyword: '3234500001' },
-  { campaign: '1234500001', adgroup: '2234500002', keyword: '3234500002' },
-  { campaign: '1234500002', adgroup: '2234500003', keyword: '3234500003' },
-];
+  ['1234500001', '2234500001', '3234500001', 'demo app', 6, 1.6, 1.3],
+  ['1234500001', '2234500001', '3234500002', 'demo app sleep', 2, 1.5, 1.2],
+  ['1234500002', '2234500002', '3234500003', 'sleep sounds', 8, 0.9, 0.8],
+  ['1234500002', '2234500002', '3234500004', 'white noise', 7, 0.4, 0.5],
+  ['1234500002', '2234500002', '3234500005', 'rain sounds', 3, 0.6, 0.6],
+  ['1234500002', '2234500003', '3234500006', 'sleep app', 6, 1.2, 1.1],
+  ['1234500002', '2234500003', '3234500007', 'insomnia help', 3, 1.4, 1.6],
+  ['1234500002', '2234500003', '3234500008', 'sleep tracker', 4, 0.7, 0.6],
+  ['1234500003', '2234500004', '3234500009', 'meditation app', 5, 1.0, 1.0],
+  ['1234500003', '2234500004', '3234500010', 'guided meditation', 3, 1.1, 1.2],
+  ['1234500003', '2234500004', '3234500011', 'mindfulness', 2, 0.6, 0.8],
+  ['1234500003', '2234500005', '3234500012', 'anxiety relief', 3, 1.3, 1.4],
+  ['1234500003', '2234500005', '3234500013', 'stress relief', 2, 0.8, 0.9],
+].map(([campaign, adgroup, keyword, name, w, t, c]) => ({ campaign, adgroup, keyword, name, w, t, c }));
 
-const INSTALL_COUNT = 300;
+const INSTALL_COUNT = 500;
 const installs = [];
 const clicks = [];
 let clickN = 0;
@@ -90,7 +106,7 @@ for (let n = 1; n <= INSTALL_COUNT; n++) {
   const d = spike ? int(9, 11) : day;
   const firstSeen = Math.min(now - 60_000, now - d * DAY - int(0, DAY - 1));
 
-  const kind = spike ? 'tiktok' : weighted([['tiktok', 24], ['asa', 20], ['ios_organic', 22], ['android_organic', 25], ['deep_link', 4], ['reported', 3]]);
+  const kind = spike ? 'tiktok' : weighted([['tiktok', 24], ['asa', 45], ['ios_organic', 22], ['android_organic', 25], ['deep_link', 4], ['reported', 3]]);
   const platform = kind === 'tiktok' || kind === 'android_organic' ? 'android' : kind === 'asa' || kind === 'ios_organic' ? 'ios' : weighted([['ios', 1], ['android', 1]]);
   let a = base('organic', platform === 'ios' ? 'App Store' : 'Google Play', 'Organic');
   if (kind === 'tiktok') {
@@ -99,7 +115,7 @@ for (let n = 1; n <= INSTALL_COUNT; n++) {
     a = { ...base('install_referrer', 'TikTok', 'Organic Social'), utm_source: 'tiktok', utm_medium: 'social', utm_campaign: link.campaign, utm_content: link.content, click_id: clickId };
     clicks.push([clickId, link.id, APP_ID, firstSeen - int(20, 300) * 1000, 'android', null, `demo-install-${String(n).padStart(4, '0')}`]);
   } else if (kind === 'asa') {
-    a = { ...base('search_ads', 'Apple Search Ads', 'Paid Search'), asa: pick(ASA) };
+    a = { ...base('search_ads', 'Apple Search Ads', 'Paid Search'), asa: weighted(ASA.map((k) => [k, k.w])) };
   } else if (kind === 'deep_link') {
     const nl = rand() < 0.6;
     a = nl
@@ -189,19 +205,23 @@ const payments = [];
 const rcEvents = [];
 let payN = 0;
 const eligible = installs.filter((i) => i.firstSeen < now - 2 * DAY);
-const buyers = eligible.filter((i) => rand() < (i.a.method === 'search_ads' ? 0.2 : i.a.method === 'install_referrer' ? 0.12 : 0.05)).slice(0, 14);
+// Direct buyers (no trial). Search Ads keywords that convert well (`c`) bring more of them.
+const buyRate = (i) => (i.a.method === 'search_ads' ? 0.12 * i.a.asa.c : i.a.method === 'install_referrer' ? 0.1 : 0.04);
+const buyers = eligible.filter((i) => rand() < buyRate(i)).slice(0, 36);
 
 function pay(inst, ts, product, eventType, opts = {}) {
   const id = `demo-rc-${String(++payN).padStart(4, '0')}`;
   const refund = opts.refund === true;
   const amount = refund ? -product.cents : product.cents;
-  const kindName = refund ? 'rc_refunded' : eventType === 'RENEWAL' ? 'rc_subscription_renewed' : product.id === 'lifetime_premium' ? 'rc_in_app_purchase' : 'rc_subscription_started';
+  const kindName = refund ? 'rc_refunded' : opts.trialConversion ? 'rc_trial_converted' : eventType === 'RENEWAL' ? 'rc_subscription_renewed' : product.id === 'lifetime_premium' ? 'rc_in_app_purchase' : 'rc_subscription_started';
   const sess = inst ? sessions.filter((s) => s.inst === inst && s.started <= ts).at(-1) : null;
+  // Credit like the server (creditSql): the latest non-direct session, else none (the install's own source).
+  const credited = inst ? sessions.filter((s) => s.inst === inst && s.started <= ts && s.channel !== 'Direct').at(-1) : null;
   const appUserId = opts.noInstall ? '$RCAnonymousID:demo' + hex(12) : inst?.userId ?? `$RCAnonymousID:${hex(24)}`;
   payments.push([
     id, APP_ID, ts, refund ? 'refund' : 'payment', amount, eventType, product.id,
     inst?.platform === 'android' ? 'PLAY_STORE' : 'APP_STORE', opts.sandbox ? 'SANDBOX' : 'PRODUCTION', appUserId,
-    opts.noInstall ? null : inst.id, sess ? sess.sid : null, opts.noInstall ? 'none' : opts.matchedBy ?? 'install_id', eventType === 'RENEWAL' ? 1 : 0,
+    opts.noInstall ? null : inst.id, credited ? credited.sid : null, opts.noInstall ? 'none' : opts.matchedBy ?? 'install_id', eventType === 'RENEWAL' ? 1 : 0,
   ]);
   rcEvents.push([
     id, APP_ID, ts, eventType, opts.sandbox ? 'SANDBOX' : 'PRODUCTION', opts.noInstall ? 0 : 1, opts.noInstall ? null : inst.id, appUserId, kindName,
@@ -228,6 +248,34 @@ buyers.forEach((inst, i) => {
     for (let r = 1; first + r * 7 * DAY < now - 3_600_000 && r <= 2; r++) pay(inst, first + r * 7 * DAY, product, 'RENEWAL');
   }
 });
+// Free trials: 7 days on the monthly or annual plan, much more common from Search Ads. A trial either converts
+// (RENEWAL with is_trial_conversion → rc_trial_converted plus the first payment), is cancelled before it ends
+// (rc_subscription_cancelled, then rc_subscription_expired), or is still running.
+const TRIAL_DAYS = 7;
+const TRIAL_PRODUCTS = [[PRODUCTS[0], 3], [PRODUCTS[1], 2]];
+function rcLog(inst, ts, type, name, props) {
+  const id = `demo-rc-${String(++payN).padStart(4, '0')}`;
+  const sess = sessions.filter((s) => s.inst === inst && s.started <= ts).at(-1);
+  rcEvents.push([id, APP_ID, ts, type, 'PRODUCTION', 1, inst.id, inst.userId ?? `$RCAnonymousID:${hex(24)}`, name, JSON.stringify(props)]);
+  addEvent(inst, sess ? sess.sid : null, ts, 'event', name, props);
+}
+const trialRate = (i) => (i.a.method === 'search_ads' ? Math.min(0.85, 0.45 * i.a.asa.t) : i.a.method === 'install_referrer' ? 0.18 : 0.07);
+for (const inst of eligible.filter((i) => !PAYING.has(i) && rand() < trialRate(i)).slice(0, 140)) {
+  const product = weighted(TRIAL_PRODUCTS);
+  const store = inst.platform === 'android' ? 'PLAY_STORE' : 'APP_STORE';
+  const start = Math.min(now - 3_600_000, inst.firstSeen + int(2, 36 * 60) * 60_000);
+  const end = start + TRIAL_DAYS * DAY;
+  rcLog(inst, start, 'INITIAL_PURCHASE', 'rc_trial_started', { product_id: product.id, store, price_usd: 0 });
+  if (end >= now) continue; // still in trial
+  if (rand() < Math.min(0.9, 0.42 * (inst.a.asa?.c ?? 1))) {
+    PAYING.set(inst, product);
+    pay(inst, end, product, 'RENEWAL', { trialConversion: true });
+  } else {
+    const cancelAt = start + int(1, TRIAL_DAYS * 24 - 1) * 3_600_000;
+    rcLog(inst, cancelAt, 'CANCELLATION', 'rc_subscription_cancelled', { product_id: product.id, store, price_usd: 0, reason: 'UNSUBSCRIBE' });
+    rcLog(inst, end, 'EXPIRATION', 'rc_subscription_expired', { product_id: product.id, store, price_usd: 0 });
+  }
+}
 // Two refunds (customer support), one sandbox test purchase, and one payment that never matched an install.
 for (const inst of [...PAYING.keys()].slice(0, 2)) {
   const product = PAYING.get(inst);
@@ -262,10 +310,15 @@ insert(
   payments,
 );
 insert('rc_events', ['id', 'app_id', 'ts', 'type', 'environment', 'has_install_attr', 'install_id', 'app_user_id', 'lifecycle_name', 'lifecycle_props'], rcEvents);
+insert('asa_names', ['app_id', 'kind', 'id', 'name', 'updated_at'], [
+  ...Object.entries(ASA_CAMPAIGNS).map(([id, name]) => [APP_ID, 'campaign', id, name, now]),
+  ...Object.entries(ASA_ADGROUPS).map(([id, name]) => [APP_ID, 'adgroup', id, name, now]),
+  ...ASA.map((k) => [APP_ID, 'keyword', k.keyword, k.name, now]),
+]);
 
 mkdirSync('.wrangler', { recursive: true });
 writeFileSync('.wrangler/seed.sql', out.join('\n') + '\n');
 const refunds = payments.filter((p) => p[3] === 'refund').length;
 console.log(
-  `Wrote .wrangler/seed.sql: 1 app, ${installs.length} installs, ${sessions.length} sessions, ${events.length} events, ${payments.length} payments (${refunds} refunds, 1 sandbox), ${clicks.length} link clicks`,
+  `Wrote .wrangler/seed.sql: 1 app, ${installs.length} installs, ${sessions.length} sessions, ${events.length} events, ${payments.length} payments (${refunds} refunds, 1 sandbox), ${clicks.length} link clicks, ${events.filter((e) => e[6] === 'rc_trial_started').length} trials, ${ASA.length} Search Ads keywords`,
 );

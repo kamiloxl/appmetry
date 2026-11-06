@@ -190,6 +190,8 @@ export async function handleRevenueCat(c: Context<AppEnv>): Promise<Response> {
       // price_usd follows the stored amount, so payments and events agree.
       const props: Record<string, unknown> = { product_id: productId, store, price_usd: amountCents(event) / 100 };
       if (lifecycleName === 'rc_subscription_cancelled') props.reason = text(event.cancel_reason, 64);
+      // Lets stats drop sandbox trials like sandbox payments (show_sandbox). Production props stay unchanged.
+      if (environment === 'SANDBOX') props.sandbox = true;
       lifecycleProps = JSON.stringify(props);
       if (installId) statements.push(lifecycleInsert(db, app.id, id, installId, rcTs, lifecycleName, lifecycleProps));
     }

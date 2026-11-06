@@ -12,6 +12,8 @@ export type Dim =
   | 'source'
   | 'campaign'
   | 'asa_campaign_id'
+  | 'asa_adgroup_id'
+  | 'asa_keyword_id'
   | 'platform'
   | 'country'
   | 'app_version'
@@ -26,6 +28,8 @@ export const INSTALL_DIMS = {
   source: 'source',
   campaign: 'utm_campaign',
   asa_campaign_id: 'asa_campaign_id',
+  asa_adgroup_id: 'asa_adgroup_id',
+  asa_keyword_id: 'asa_keyword_id',
   platform: 'platform',
   country: 'country',
   app_version: 'app_version',
@@ -69,6 +73,8 @@ export interface StatsCtx {
   filter: { where: string; binds: unknown[] };
   /** SQL fragment excluding sandbox payments (alias `p`), empty when the app shows them. */
   sandbox: string;
+  /** The same for RevenueCat lifecycle events (alias `e`), which carry `props.sandbox` when from the sandbox. */
+  eventSandbox: string;
 }
 
 const parseMs = (s: string | undefined): number | null => {
@@ -107,5 +113,6 @@ export function statsContext(c: Context<AppEnv>, app: AppRow, now = Date.now()):
     offset: tzOffset(app.timezone, range.to),
     filter,
     sandbox: app.show_sandbox ? '' : ` AND (p.environment IS NULL OR p.environment != 'SANDBOX')`,
+    eventSandbox: app.show_sandbox ? '' : ` AND COALESCE(json_extract(e.props, '$.sandbox'), 0) = 0`,
   };
 }

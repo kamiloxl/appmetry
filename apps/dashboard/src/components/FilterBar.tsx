@@ -5,6 +5,8 @@ const DIM_LABELS: Record<string, string> = {
   source: 'Source',
   campaign: 'Campaign',
   asa_campaign_id: 'Search Ads campaign',
+  asa_adgroup_id: 'Search Ads ad group',
+  asa_keyword_id: 'Search Ads keyword',
   platform: 'Platform',
   country: 'Country',
   app_version: 'App version',
@@ -12,8 +14,21 @@ const DIM_LABELS: Record<string, string> = {
   device_model: 'Device',
 };
 
-/** Active filters as removable chips. With `hint`, an empty bar says how to add one; otherwise it renders nothing. */
-export function FilterBar({ filters, onRemove, hint }: { filters: Record<string, string>; onRemove: (dim: string) => void; hint?: string }) {
+/**
+ * Active filters as removable chips. With `hint`, an empty bar says how to add one; otherwise it renders nothing.
+ * `labels` maps a dimension to a display name for its value (Search Ads names); the value itself is shown otherwise.
+ */
+export function FilterBar({
+  filters,
+  onRemove,
+  hint,
+  labels = {},
+}: {
+  filters: Record<string, string>;
+  onRemove: (dim: string) => void;
+  hint?: string;
+  labels?: Record<string, string>;
+}) {
   const entries = Object.entries(filters);
   if (entries.length === 0) {
     return hint ? (
@@ -28,11 +43,11 @@ export function FilterBar({ filters, onRemove, hint }: { filters: Record<string,
       {entries.map(([dim, value]) => (
         <span key={dim} className="inline-flex h-8 items-center gap-1.5 rounded-lg border bg-card pl-2.5 pr-1 text-sm shadow-card" data-testid={`chip-${dim}`}>
           <span className="text-muted-foreground">{DIM_LABELS[dim] ?? dim}</span>
-          <span className="font-medium">{value}</span>
+          <span className="font-medium">{labels[dim] ?? value}</span>
           <button
             className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             onClick={() => onRemove(dim)}
-            aria-label={`Remove ${DIM_LABELS[dim] ?? dim} filter ${value}`}
+            aria-label={`Remove ${DIM_LABELS[dim] ?? dim} filter ${labels[dim] ?? value}`}
           >
             <X className="size-3.5" />
           </button>

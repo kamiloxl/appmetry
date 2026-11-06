@@ -1,5 +1,6 @@
 import { bucketLabels, bucketSql } from '../lib/time';
 import type { StatsCtx } from './filters';
+import { TRIAL_COUNTS, TRIAL_STARTED, trialsFrom } from './trials';
 
 export interface Totals {
   installs: number;
@@ -11,12 +12,19 @@ export interface Totals {
   conversionRate: number;
   revenuePerInstall: number;
   avgSessionMs: number;
+  /** Installs that started a trial in the period. */
+  trials: number;
+  /** Installs whose trial converted to paid in the period. */
+  trialsConverted: number;
+  /** trials / installs of the period (both dated in the period, so not a strict cohort rate). */
+  trialRate: number;
 }
 
 export interface Overview {
   current: Totals;
   previous: Totals;
-  series: { label: string; installs: number; revenue: number }[];
+  /** Per bucket: installs, revenue (USD cents) and installs that started a trial. */
+  series: { label: string; installs: number; revenue: number; trials: number }[];
 }
 
 // Installs `i` and payments `p` are always LEFT JOINed to what they need; the filter clause (see installFilterSql)
@@ -34,7 +42,7 @@ interface Row {
   [k: string]: number | null;
 }
 
-function totals(installs: Row, sessions: Row, payments: Row): Totals {
+function totals(installs: Row, sessions: Row, payments: Row, trials: Row): Totals {
   const n = installs.n ?? 0;
   const revenue = payments.revenue ?? 0;
   const paying = payments.paying ?? 0;
@@ -47,10 +55,13 @@ function totals(installs: Row, sessions: Row, payments: Row): Totals {
     conversionRate: n ? paying / n : 0,
     revenuePerInstall: n ? revenue / n : 0,
     avgSessionMs: Math.round(sessions.avg ?? 0),
+    trials: trials.trials ?? 0,
+    trialsConverted: trials.converted ?? 0,
+    trialRate: n ? (trials.trials ?? 0) / n : 0,
   };
 }
 
-/** Top numbers for the range and the previous period, plus the installs/revenue chart. One batch of 8 reads. */
+/** Top numbers for the range and the previous period, plus the installs/revenue/trials chart. One batch of 11 reads. */
 export async function overview(ctx: StatsCtx): Promise<Overview> {
   const { db, range, app, filter } = ctx;
   const f = filter.where;
@@ -74,27 +85,34 @@ export async function overview(ctx: StatsCtx): Promise<Overview> {
            ${PAYMENTS_SQL(f, ctx.sandbox)}`,
         )
         .bind(...args, ...filter.binds),
+      db.prepare(`SELECT ${TRIAL_COUNTS} ${trialsFrom(ctx)}`).bind(...args, ...filter.binds),
     ];
   });
   const args = [app.id, range.from, range.to];
   const ib = bucketSql('i.first_seen', range.granularity, ctx.offset);
   const pb = bucketSql('p.ts', range.granularity, ctx.offset);
+  const eb = bucketSql('e.ts', range.granularity, ctx.offset);
   stmts.push(
     db.prepare(`SELECT ${ib} AS b, COUNT(*) AS n ${INSTALLS_SQL(f)} GROUP BY b`).bind(...args, ...filter.binds),
     db.prepare(`SELECT ${pb} AS b, SUM(p.amount) AS revenue ${PAYMENTS_SQL(f, ctx.sandbox)} GROUP BY b`).bind(...args, ...filter.binds),
+    db
+      .prepare(`SELECT ${eb} AS b, COUNT(DISTINCT CASE WHEN e.name = '${TRIAL_STARTED}' THEN e.install_id END) AS trials ${trialsFrom(ctx)} GROUP BY b`)
+      .bind(...args, ...filter.binds),
   );
 
   const r = await db.batch(stmts);
   const first = (i: number) => (r[i].results[0] ?? {}) as Row;
-  const installsBy = new Map((r[6].results as { b: string; n: number }[]).map((x) => [x.b, x.n]));
-  const revenueBy = new Map((r[7].results as { b: string; revenue: number }[]).map((x) => [x.b, x.revenue]));
+  const installsBy = new Map((r[8].results as { b: string; n: number }[]).map((x) => [x.b, x.n]));
+  const revenueBy = new Map((r[9].results as { b: string; revenue: number }[]).map((x) => [x.b, x.revenue]));
+  const trialsBy = new Map((r[10].results as { b: string; trials: number }[]).map((x) => [x.b, x.trials]));
   return {
-    current: totals(first(0), first(1), first(2)),
-    previous: totals(first(3), first(4), first(5)),
+    current: totals(first(0), first(1), first(2), first(3)),
+    previous: totals(first(4), first(5), first(6), first(7)),
     series: bucketLabels(range, ctx.offset).map((label) => ({
       label,
       installs: installsBy.get(label) ?? 0,
       revenue: revenueBy.get(label) ?? 0,
+      trials: trialsBy.get(label) ?? 0,
     })),
   };
 }

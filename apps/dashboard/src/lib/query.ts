@@ -14,7 +14,7 @@ export interface QueryState {
 export const RANGES = ['today', 'yesterday', '24h', '48h', '7d', '30d', '90d', '12m', 'all', 'custom'] as const;
 export const INTERVALS = ['hour', 'day', 'week', 'month'] as const;
 /** Install-level dimensions the server accepts as filters. */
-export const FILTER_DIMS = ['channel', 'source', 'campaign', 'asa_campaign_id', 'platform', 'country', 'app_version', 'os_version', 'device_model'] as const;
+export const FILTER_DIMS = ['channel', 'source', 'campaign', 'asa_campaign_id', 'asa_adgroup_id', 'asa_keyword_id', 'platform', 'country', 'app_version', 'os_version', 'device_model'] as const;
 
 export const DEFAULT_RANGE = '30d';
 

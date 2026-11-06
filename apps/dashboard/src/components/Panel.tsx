@@ -13,7 +13,15 @@ export interface TabDef {
   filterable?: boolean;
 }
 
-function renderLabel(dim: string, value: string): ReactNode {
+function renderLabel(dim: string, value: string, label?: string): ReactNode {
+  // A Search Ads name, with its id muted after it.
+  if (label)
+    return (
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className="truncate">{label}</span>
+        <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{value}</span>
+      </span>
+    );
   const text = <span className="truncate">{value}</span>;
   switch (dim) {
     case 'channel':
@@ -42,6 +50,9 @@ function renderLabel(dim: string, value: string): ReactNode {
   }
 }
 
+const trialTitle = (trials: number, converted: number) =>
+  trials || converted ? `${number(trials)} started a trial, ${number(converted)} converted to paid` : undefined;
+
 function Skeleton() {
   return (
     <div className="space-y-1" aria-busy="true" aria-label="Loading">
@@ -53,7 +64,7 @@ function Skeleton() {
 }
 
 /** One tab's rows. Mounted per tab (keyed), so each tab fetches on first selection and never shows another tab's rows. */
-function PanelBody({ appId, q, tab, reloadKey, onPick }: { appId: string; q: QueryState; tab: TabDef; reloadKey: number; onPick?: (dim: string, value: string) => void }) {
+function PanelBody({ appId, q, tab, reloadKey, onPick }: { appId: string; q: QueryState; tab: TabDef; reloadKey: number; onPick?: (dim: string, value: string, label?: string) => void }) {
   const [retry, setRetry] = useState(0);
   const { data, loading, error } = useApi<BreakdownRow[]>(`/api/apps/${appId}/stats/breakdown?${toSearch(q)}&dim=${encodeURIComponent(tab.dim)}`, reloadKey + retry);
   const max = Math.max(1, ...(data ?? []).map((r) => r.installs));
@@ -80,9 +91,14 @@ function PanelBody({ appId, q, tab, reloadKey, onPick }: { appId: string; q: Que
             <span className="absolute inset-0 flex">
               <span className="rounded-lg bg-installsSoft transition-all" style={{ width: `${(r.installs / max) * 100}%`, minWidth: r.installs ? 4 : 0 }} />
             </span>
-            <span className="relative flex min-w-0 flex-1 items-center gap-2.5 px-3 text-left text-sm">{renderLabel(tab.dim, r.value)}</span>
+            <span className="relative flex min-w-0 flex-1 items-center gap-2.5 px-3 text-left text-sm">{renderLabel(tab.dim, r.value, r.label)}</span>
             <span className="relative flex shrink-0 items-center gap-3 pr-3 text-sm font-medium">
               <span className="w-16 text-right text-sm font-normal text-revenue">{r.revenue !== 0 ? money(r.revenue) : ''}</span>
+              {tab.filterable && (
+                <span className="w-12 text-right font-normal" title={trialTitle(r.trials, r.trialsConverted)}>
+                  {r.trials ? number(r.trials) : ''}
+                </span>
+              )}
               <span className="w-10 text-right">{number(r.installs)}</span>
             </span>
           </>
@@ -94,8 +110,8 @@ function PanelBody({ appId, q, tab, reloadKey, onPick }: { appId: string; q: Que
             type="button"
             className={`${cls} transition-colors hover:bg-stone-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${active === r.value ? 'ring-2 ring-primary/30' : ''}`}
             aria-pressed={active === r.value}
-            title={active === r.value ? `Remove filter ${r.value}` : `Filter by ${r.value}`}
-            onClick={() => onPick?.(tab.dim, r.value)}
+            title={active === r.value ? `Remove filter ${r.label ?? r.value}` : `Filter by ${r.label ?? r.value}`}
+            onClick={() => onPick?.(tab.dim, r.value, r.label)}
           >
             {inner}
           </button>
@@ -109,10 +125,11 @@ function PanelBody({ appId, q, tab, reloadKey, onPick }: { appId: string; q: Que
   );
 }
 
-/** Tabbed breakdown card (installs bars with revenue), fed by /api/apps/:id/stats/breakdown. */
-export function Panel({ appId, q, tabs, reloadKey = 0, onPick }: { appId: string; q: QueryState; tabs: TabDef[]; reloadKey?: number; onPick?: (dim: string, value: string) => void }) {
+/** Tabbed breakdown card (installs bars with revenue and, for install dimensions, trials), fed by /api/apps/:id/stats/breakdown. */
+export function Panel({ appId, q, tabs, reloadKey = 0, onPick }: { appId: string; q: QueryState; tabs: TabDef[]; reloadKey?: number; onPick?: (dim: string, value: string, label?: string) => void }) {
   const [active, setActive] = useState(tabs[0]!.dim);
-  const tab = tabs.find((t) => t.dim === active)!;
+  // Falls back to the first tab when `active` is no longer among `tabs` (the tab set changed).
+  const tab = tabs.find((t) => t.dim === active) ?? tabs[0]!;
 
   return (
     <section className="card flex min-h-[440px] flex-col">
@@ -124,7 +141,10 @@ export function Panel({ appId, q, tabs, reloadKey = 0, onPick }: { appId: string
             </button>
           ))}
         </div>
-        <span className="shrink-0 pr-1 text-xs font-medium text-muted-foreground">Installs</span>
+        <span className="flex shrink-0 items-center gap-3 pr-2 text-xs font-medium text-muted-foreground">
+          {tab.filterable && <span className="w-12 text-right">Trials</span>}
+          <span className="w-10 text-right">Installs</span>
+        </span>
       </div>
       <div className="flex-1 p-2">
         <PanelBody key={tab.dim} appId={appId} q={q} tab={tab} reloadKey={reloadKey} onPick={onPick} />

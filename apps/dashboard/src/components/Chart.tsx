@@ -5,15 +5,21 @@ import { cn } from '../lib/utils';
 
 const tick = { fill: '#8a837d', fontSize: 12 };
 
-/** Installs as a line (left axis) over revenue bars (right axis, USD). X labels come straight from the server's series. */
+/**
+ * Installs and trial starts as lines (left axis, counts) over revenue bars (right axis, USD).
+ * X labels come straight from the server's series.
+ */
 export function Chart({ series, stale = false }: { series: Overview['series'] | null; stale?: boolean }) {
   return (
-    <section className={cn('card flex flex-col transition-opacity', stale && 'opacity-60')} aria-label="Installs and revenue chart">
+    <section className={cn('card flex flex-col transition-opacity', stale && 'opacity-60')} aria-label="Installs, trials and revenue chart">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b px-4 py-3">
-        <h2 className="text-sm font-semibold">Installs &amp; revenue</h2>
+        <h2 className="text-sm font-semibold">Installs, trials &amp; revenue</h2>
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <span className="h-0.5 w-3.5 rounded-full bg-installsInk" aria-hidden="true" /> Installs
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-0.5 w-3.5 rounded-full bg-trials" aria-hidden="true" /> Trials
           </span>
           <span className="flex items-center gap-1.5">
             <span className="size-2.5 rounded-sm bg-revenue" aria-hidden="true" /> Revenue
@@ -46,6 +52,9 @@ export function Chart({ series, stale = false }: { series: Overview['series'] | 
               />
               <Bar yAxisId="r" dataKey="revenue" name="Revenue" fill="#e07b5f" radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={false} />
               <Line yAxisId="i" type="monotone" dataKey="installs" name="Installs" stroke="#5a9be0" strokeWidth={2.5} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} isAnimationActive={false} />
+              {/* Trials share the installs scale, so the line runs low across the revenue bars: a white halo keeps it readable. */}
+              <Line yAxisId="i" type="monotone" dataKey="trials" stroke="#ffffff" strokeWidth={6} dot={false} activeDot={false} legendType="none" tooltipType="none" isAnimationActive={false} />
+              <Line yAxisId="i" type="monotone" dataKey="trials" name="Trials" stroke="#8e6bd8" strokeWidth={2.5} dot={{ r: 2.5, strokeWidth: 0, fill: '#8e6bd8' }} activeDot={{ r: 4, strokeWidth: 0 }} isAnimationActive={false} />
             </ComposedChart>
           </ResponsiveContainer>
         ) : (
