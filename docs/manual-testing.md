@@ -175,3 +175,30 @@ Expected:
 - RevenueCat health shows every event carrying the install id (100%) and no warning. Note that health
   counts production events only; to check it, repeat with a production purchase or read `withInstallId24h`
   against `events24h` after a production delivery.
+
+## 8. Meta Conversions API and ad links (not yet verified against Meta)
+
+Needs a Meta dataset linked to the app in Events Manager, a Conversions API token, and `INTEGRATIONS_KEY` set
+(`.dev.vars` locally). Partly checked on a local preview on 2026-11-06 with fake values: connect, save settings,
+mappings, activation and ad-link creation work; nothing was sent to Meta.
+
+1. Dashboard → Integrations → Meta Ads → **Connect**. Paste the dataset ID and token, add the test event code from
+   Events Manager → Test events, **Save**.
+   - Expect "Saved", the token shown as "•••• saved", and the token never in any API response.
+2. **Send test event** (`MobileAppInstall`, then `Purchase`).
+   - Expect "Meta accepted it" and both events in Events Manager → Test events within a minute.
+   - Note the response to a broken token (paste `EAAG000…`): expect a code 190 message. If Meta's error body differs
+     from `{ error: { code, message } }`, fix `meta.classify`.
+3. Activate (accept the terms). In the demo app call `Appmetry.setAdConsent(true)` after the ATT prompt, reinstall,
+   then make a sandbox purchase (with the test event code still set).
+   - Expect `MobileAppInstall` and `StartTrial` / `Purchase` rows `sent` in the delivery log and in Test events, with
+     `advertiser_tracking_enabled` 1 and the IDFA when ATT was allowed; 0 and no IDFA when it was denied.
+4. Without ad consent (`setAdConsent(false)`, reinstall): expect no delivery rows at all.
+5. Optional, with `META_APP_ID` / `META_APP_SECRET`: **Connect with Facebook**, approve, expect "Connected to Facebook"
+   and your datasets in the dropdown; **Refresh** lists them again.
+6. Ad links: create one with an in-app URL, open its deep link on a device with the app installed
+   (`xcrun simctl openurl booted '<deep link>'`).
+   - Expect the install's source to become the ad link (`deep_link` method) and `/api/v1/attribution` to return
+     `deep_link`. On Android, install through the website URL (Play internal track) and expect
+     `onDeferredDeepLink` to fire once with the in-app URL.
+7. Remove the test event code before production.

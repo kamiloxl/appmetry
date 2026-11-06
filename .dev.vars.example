@@ -1,1 +1,7 @@
 ADMIN_PASSWORD=change-me-please
+
+# Optional: ad-network integrations (Integrations page). 32 random bytes, base64: openssl rand -base64 32
+# INTEGRATIONS_KEY=
+# Optional: "Connect with Facebook" on the Meta page (a Meta app you own)
+# META_APP_ID=
+# META_APP_SECRET=

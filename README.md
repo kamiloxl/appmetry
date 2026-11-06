@@ -8,9 +8,10 @@ appmetry is a source-available, self-hosted, revenue-first analytics product for
 
 ## What it tracks
 
-- **Installs, sessions, screens, custom events**, with device, OS, app version, locale, timezone and city-level geo. No IP address, IDFA/GAID or coordinates are stored.
+- **Installs, sessions, screens, custom events**, with device, OS, app version, locale, timezone and city-level geo. No coordinates are stored. No IP address or IDFA/GAID is stored, except as described under [Ad networks](#ad-networks-meta) for users who gave ad consent.
 - **Install attribution**: tracked links plus Android Install Referrer, Apple Search Ads (AdServices), deep links and a self-reported source. There is no fingerprinting.
 - **Revenue**: RevenueCat webhooks matched to installs and credited to a source (last non-direct touch). Money is stored as integer USD cents; refunds are negative.
+- **Ad networks (optional)**: send installs, trials and purchases to Meta's Conversions API so campaigns optimise for them, with ad links that carry campaign ids and an in-app URL. Off until you connect a network; only for users who gave ad consent.
 - **Dashboard**: overview cards, installs and revenue chart, panels by channel, source, campaign, platform, country and more, a customer journey view, tracked links and per-app settings.
 
 ## Deploy in 5 minutes
@@ -82,6 +83,19 @@ Create links in the dashboard (**Links**). `/l/<slug>` records a click, then red
 - **iOS**: to the App Store. See the iOS note under [Accuracy notes](#accuracy-notes).
 - **Other**: to the web URL.
 
+## Ad networks (Meta)
+
+Off by default. In the dashboard open **Integrations → Meta Ads**:
+
+1. **Server secret**: add `INTEGRATIONS_KEY` (32 random bytes, base64: `openssl rand -base64 32`) as a Worker secret. It encrypts ad-network tokens and advertising ids. Keep it: losing it means pasting tokens again. To rotate, move the old value to `INTEGRATIONS_KEY_PREVIOUS`.
+2. **Dataset and token**: in Meta Events Manager link a dataset to your app (Settings → Connected apps), generate a Conversions API access token, and paste the dataset ID and the token. Optional: add `META_APP_ID` and `META_APP_SECRET` (a Meta app you own, with `https://<your-domain>/api/integrations/meta/oauth/callback` as a valid OAuth redirect URI) to pick datasets after **Connect with Facebook** instead of typing the ID.
+3. **Events**: map appmetry events to Meta events. `Install → MobileAppInstall` is fixed; trial start, subscription start, trial conversion and in-app purchase are mapped by default. Add your own `Appmetry.track()` events.
+4. **Test**: add a test event code from Events Manager → Test events, click **Send test event**, and check it arrives. Remove the code for production.
+5. **Activate**: accept the Meta Business Tools Terms. Events then go out as they arrive; failed sends retry for about a day. The page shows 24 h counts, the last error and a delivery log.
+6. **Ad links**: create one per ad. Put the website URL and the shared URL parameters (Meta macros such as `{{campaign.id}}`) in the ad, and the deep link in the ad's deep-link field. See the SDK README for `onDeferredDeepLink`.
+
+In the app, ask for consent and call `Appmetry.setAdConsent(true)`; nothing is sent without it. With consent the SDK also reads the IDFA (iOS, only when ATT is authorized) or the GAID (Android). On iOS without ATT, events go without device identifiers (Meta's aggregated measurement). Design: [docs/superpowers/specs/2026-11-06-ad-network-postbacks-design.md](docs/superpowers/specs/2026-11-06-ad-network-postbacks-design.md).
+
 ## RevenueCat
 
 1. In the dashboard open your app's settings (or wizard step 3) and generate a webhook secret. It is shown once and stored hashed.
@@ -112,7 +126,8 @@ This section is a starting point, not legal advice.
 - **Personal data.** `app_user_id` (RevenueCat) and `identify` email/name are personal data. Send an opaque `userId` rather than an email or name. The erase endpoint takes the id in the query string (`DELETE /api/apps/:id/users`), so avoid emails as ids: they would land in request logs.
 - **Retention.** Per-app `retention_months`, default 25. An hourly job (each app at most once per 23 h) deletes events, sessions and link clicks older than the cutoff. It then deletes installs whose last activity is older than the cutoff and that have no session left. For those installs, link clicks are detached, and their payments lose install id, `app_user_id` and session id and get `matched_by = erased`, and their RevenueCat delivery logs lose install id and `app_user_id`, but the rows stay. Payments are never deleted by retention. RevenueCat delivery logs are deleted after 30 days.
 - **Erasure.** Settings → Delete user data, by `user_id` or install id. It deletes the matching installs with their sessions and events, detaches their link clicks (the click rows stay), and clears, on their payments, the install id, RevenueCat `app_user_id` and session id (`matched_by` becomes `erased`), and on their delivery logs the install id and `app_user_id`. Payment rows (amount, timestamp, product, store) are kept for accounting without identifying fields. With a `user_id` it also clears `app_user_id` on all payments and delivery logs of that app with that RevenueCat `app_user_id`.
-- **Location and processor.** See [Data location](#data-location) and Cloudflare's DPA. GitHub holds your fork; npm serves the SDK at build time; RevenueCat sends webhooks in.
+- **Ad networks.** When you activate an integration, events of users who gave ad consent are sent to that network (Meta: in the US, under its Business Tools Terms). They include a random install id and, where tracking is allowed, the advertising id, IP address and user agent; a hashed user id; and a hashed email only if you turn that on. The advertising id is stored encrypted on the install; IP and user agent are stored encrypted only until the event is sent. Do a DPIA and document the transfer before activating, update your privacy policy (the wizard's paragraph covers it once an integration is active), and remember that data already sent must be deleted through the network.
+- **Location and processor.** See [Data location](#data-location) and Cloudflare's DPA. GitHub holds your fork; npm serves the SDK at build time; RevenueCat sends webhooks in; connected ad networks receive events out.
 - If your app handles sensitive personal data (for example health, legal or family matters), do a DPIA before sending emails or names through `identify`, and prefer an opaque `userId`.
 
 ## Security
@@ -134,7 +149,7 @@ This section is a starting point, not legal advice.
 
 ## Accuracy notes
 
-- **iOS installs from links** are attributed only through a deep link open or Apple Search Ads. A tracked link to the App Store counts the click, not the install.
+- **iOS installs from links** are attributed only through a deep link open or Apple Search Ads. A tracked link to the App Store counts the click, not the install, so `onDeferredDeepLink` does not fire for fresh iOS installs yet.
 - **Expo Go** has no native module: you get organic attribution only (everything else works). Use a development build for Install Referrer and AdServices.
 - **A reinstall counts as a new install.**
 - **Timezones**: stats use one timezone offset per range, so a range that crosses a DST change can misplace up to an hour.
@@ -145,7 +160,7 @@ This section is a starting point, not legal advice.
 
 ```sh
 pnpm install
-cp .dev.vars.example .dev.vars    # sets ADMIN_PASSWORD
+cp .dev.vars.example .dev.vars    # sets ADMIN_PASSWORD (and, optionally, INTEGRATIONS_KEY)
 pnpm run dev                      # http://localhost:8787 (applies local migrations first)
 pnpm run seed                     # fills the local DB with 30 days of demo data
 pnpm test                         # all workspaces

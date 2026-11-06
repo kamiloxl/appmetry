@@ -2,6 +2,16 @@
 
 Date: 2026-11-05. Status: design approved in conversation, awaiting written-spec review.
 
+> **Update 2026-11-06.** Part 2 (`2026-11-06-ad-network-postbacks-design.md`) is implemented and changes this spec:
+> - Migrations `0003_ad_signals.sql` and `0004_ad_links.sql` already add `installs.ad_consent`, `att_status`,
+>   `campaign_id`, `adset_id`, `ad_id` and the `link_clicks` campaign columns, and the SDK already has `adConsent`,
+>   `setAdConsent`, the ATT status and `deviceModelId` (as a `consent` event type, not `$ad_consent`). This spec's
+>   migration becomes `0005_probabilistic.sql` and adds only `apps.probabilistic_ios`, `installs.match_ip_hash` and
+>   `click_signals`.
+> - iOS events go to Meta also without ATT authorization, with `advertiser_tracking_enabled = 0` and no device
+>   identifiers (Meta AEM). The "authorized only" line in §1 no longer holds.
+> - A probabilistic match should set `installs.link_id`, so `onDeferredDeepLink` works for fresh iOS installs.
+
 ## 1. Goal and context
 
 Paid social campaigns (Meta first; TikTok and Snap later) send iOS users through a tracked link straight to the App Store, with no landing page. Today Appmetry cannot connect such a click to the install: on iOS an install is attributed only by Apple Search Ads (AdServices) or by a deep link opened after install. Meta traffic on iOS therefore lands in "Organic".
