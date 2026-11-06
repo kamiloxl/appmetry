@@ -69,3 +69,24 @@ describe('oauthNotice', () => {
     expect(oauthNotice('weird')).toBeNull();
   });
 });
+
+describe('ad links', () => {
+  it('appends the ad link slug to the in-app URL', async () => {
+    const { adDeepLink } = await import('../src/lib/integrations');
+    expect(adDeepLink('absapp://onboarding/abs', 'meta-1')).toBe('absapp://onboarding/abs?amt_l=meta-1');
+    expect(adDeepLink('absapp://x?plan=6', 'meta-1')).toBe('absapp://x?plan=6&amt_l=meta-1');
+    expect(adDeepLink('https://a.io/app?#/home', 'm')).toBe('https://a.io/app?amt_l=m#/home');
+  });
+  it('validates deep link URLs like the server', async () => {
+    const { deepLinkProblem } = await import('../src/lib/integrations');
+    expect(deepLinkProblem('absapp://onboarding')).toBeNull();
+    expect(deepLinkProblem('')).toBeNull();
+    expect(deepLinkProblem('javascript://alert(1)')).not.toBeNull();
+    expect(deepLinkProblem('onboarding')).not.toBeNull();
+  });
+  it('Meta URL parameters use Meta macros and network-neutral names', async () => {
+    const { META_URL_PARAMS } = await import('../src/lib/integrations');
+    expect(META_URL_PARAMS).toContain('campaign_id={{campaign.id}}');
+    expect(META_URL_PARAMS).toContain('utm_medium=paid_social');
+  });
+});

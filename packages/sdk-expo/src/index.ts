@@ -1,4 +1,4 @@
-export { Appmetry, type AppmetryOptions } from './client';
+export { Appmetry, type AppmetryOptions, type DeferredDeepLink } from './client';
 export { createStore, type KV } from './storage';
 export { Queue, QUEUE_KEY } from './queue';
 export { Transport, type SendResult, type TransportOptions } from './transport';

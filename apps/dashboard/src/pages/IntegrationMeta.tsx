@@ -3,14 +3,15 @@ import { RefreshCw } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Modal } from '../components/Modal';
-import { Field, Section } from '../components/ui';
+import { CopyButton, Field, Section } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLabel, dateTimeLabel, money } from '../lib/format';
 import {
-  activationBlockers, errorText, eventLabel, eventsManagerUrl, mappingPayload, mappingProblem, newRow, oauthNotice, sameMappings, sourceOptions, toRows,
+  activationBlockers, adDeepLink, deepLinkProblem, errorText, eventLabel, eventsManagerUrl, META_URL_PARAMS, mappingPayload, mappingProblem, newRow, oauthNotice, sameMappings, sourceOptions, toRows,
   type MappingRow,
 } from '../lib/integrations';
-import type { Delivery, EventCatalog, Integration, IntegrationList, MetaDataset, SendScope, TestEventResult } from '../lib/types';
+import type { Delivery, EventCatalog, Integration, IntegrationList, MetaDataset, SendScope, TestEventResult, TrackedLink } from '../lib/types';
+import { linkUrl, slugify } from './Links';
 import { useApi } from '../lib/useApi';
 import { StatusBadge } from './Integrations';
 
@@ -400,6 +401,143 @@ function ActivationSection({ it, appId, onChange }: { it: Integration; appId: st
   );
 }
 
+// ---------- ad links
+
+function NewAdLink({ it, appId, onCreated, onCancel }: { it: Integration; appId: string; onCreated: (l: TrackedLink) => void; onCancel: () => void }) {
+  const [name, setName] = useState('');
+  const [deepLink, setDeepLink] = useState('');
+  const a = useAction();
+  const problem = deepLinkProblem(deepLink);
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (problem || !name.trim()) return;
+    void a.run(async () => {
+      const slug = slugify(`meta-${name}`);
+      onCreated(
+        await api<TrackedLink>(`/api/apps/${appId}/links`, {
+          method: 'POST',
+          json: {
+            name: name.trim(), slug: slug.length >= 2 ? slug : undefined, utm_source: 'meta', utm_medium: 'paid_social',
+            deep_link_url: deepLink.trim() || null, integration_id: it.id,
+          },
+        }),
+      );
+    });
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <Field label="Display name" hint="For you, e.g. the campaign or the creative.">
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={100} required placeholder="Six pack plan – video 1" autoFocus />
+      </Field>
+      <Field label="In-app URL (optional)" hint="Where the ad should open the app, e.g. absapp://onboarding/six-pack. Used for deep links and the first screen of new installs.">
+        <input className="input font-mono" value={deepLink} onChange={(e) => setDeepLink(e.target.value)} maxLength={330} placeholder="myapp://onboarding/plan" />
+      </Field>
+      {problem && <p className="text-sm text-amber-700">{problem}</p>}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {a.error && <span role="alert" className="mr-auto text-sm text-red-600">{a.error}</span>}
+        <button type="button" className="btn" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className="btn-dark" disabled={a.busy || !name.trim() || problem !== null}>
+          {a.busy ? 'Creating…' : 'Create link'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function AdLinksSection({ it, appId }: { it: Integration; appId: string }) {
+  const [reloadKey, setReloadKey] = useState(0);
+  const links = useApi<TrackedLink[]>(`/api/apps/${appId}/links`, reloadKey);
+  const [creating, setCreating] = useState(false);
+  const mine = links.data?.filter((l) => l.integration_id === it.id) ?? null;
+  const origin = window.location.origin;
+
+  return (
+    <Section
+      title="Ad links"
+      description="One link per ad or campaign. Put the website URL and the URL parameters in the ad; Meta fills in the campaign, ad set and ad, so installs and revenue land on the right ad."
+    >
+      <div className="flex flex-wrap items-center gap-2 rounded-lg bg-stone-50 px-3 py-2 text-xs">
+        <span className="font-medium text-stone-600">URL parameters (same for every ad)</span>
+        <code className="min-w-0 flex-1 truncate text-stone-500" title={META_URL_PARAMS}>
+          {META_URL_PARAMS}
+        </code>
+        <CopyButton text={META_URL_PARAMS} />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-stone-100 text-xs uppercase tracking-wide text-stone-400">
+            <tr>
+              <th className="px-3 py-2 font-medium">Display name</th>
+              <th className="px-3 py-2 font-medium">Website URL</th>
+              <th className="px-3 py-2 font-medium">Deep link</th>
+              <th className="px-3 py-2 font-medium">Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mine?.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-3 py-6 text-center text-stone-400">
+                  No ad links yet.
+                </td>
+              </tr>
+            )}
+            {mine?.map((l) => {
+              const site = linkUrl(origin, l.slug);
+              const deep = l.deep_link_url ? adDeepLink(l.deep_link_url, l.slug) : null;
+              return (
+                <tr key={l.id} className="border-b border-stone-50 align-top last:border-0">
+                  <td className="min-w-[9rem] px-3 py-2 font-medium">{l.name}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <code className="max-w-[13rem] truncate text-xs text-stone-600" title={site}>{site}</code>
+                      <CopyButton text={site} />
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    {deep ? (
+                      <div className="flex items-center gap-2">
+                        <code className="max-w-[13rem] truncate text-xs text-stone-600" title={deep}>{deep}</code>
+                        <CopyButton text={deep} />
+                      </div>
+                    ) : (
+                      <span className="text-stone-400">–</span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-stone-500">{dateLabel(l.created_at)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {links.error && <p className="mt-2 text-sm text-red-600">Could not load links: {links.error}</p>}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-stone-500">
+          Clicks, installs and revenue per link are on the <Link className="underline" to={`/apps/${appId}/links`}>Links</Link> page.
+        </p>
+        <button type="button" className="btn-dark" onClick={() => setCreating(true)}>
+          + Create link
+        </button>
+      </div>
+      <Modal open={creating} onClose={() => setCreating(false)} title="New ad link" width="max-w-lg">
+        <NewAdLink
+          it={it}
+          appId={appId}
+          onCancel={() => setCreating(false)}
+          onCreated={() => {
+            setCreating(false);
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      </Modal>
+    </Section>
+  );
+}
+
 // ---------- delivery health, test event and log
 
 function DeliverySection({ it, appId, reloadKey }: { it: Integration; appId: string; reloadKey: number }) {
@@ -588,6 +726,7 @@ export function IntegrationMeta() {
       <PostbacksSection key={`p-${it.id}`} it={it} appId={id} onChange={onChange} />
       <ActivationSection it={it} appId={id} onChange={onChange} />
       <DeliverySection it={it} appId={id} reloadKey={reloadKey} />
+      <AdLinksSection it={it} appId={id} />
 
       <Modal open={confirm} onClose={() => setConfirm(false)} title="Disconnect Meta Ads?" width="max-w-md">
         <p className="text-sm text-stone-600">

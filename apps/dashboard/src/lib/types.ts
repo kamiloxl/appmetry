@@ -109,6 +109,9 @@ export interface TrackedLink {
   utm_campaign: string | null;
   utm_content: string | null;
   ref: string | null;
+  /** In-app URL the ad opens (deep link / personalised first screen). */
+  deep_link_url: string | null;
+  integration_id: string | null;
   created_at: number;
 }
 

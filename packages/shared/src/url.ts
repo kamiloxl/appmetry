@@ -15,7 +15,15 @@ export interface Touch {
   fbclid?: string;
   /** Meta Aggregated Event Measurement: opaque, encrypted campaign metadata on the ad's deep link. */
   campaign_ids?: string;
+  /** Slug of an appmetry ad link, from the `amt_l` parameter of an ad's deep link. */
+  link_slug?: string;
+  /** The tracked link behind this touch, resolved on the server (never read from a URL). */
+  link_id?: string;
 }
+
+/** Query parameter that names the ad link in an ad's deep link: `myapp://path?amt_l=<slug>`. */
+export const AD_LINK_PARAM = 'amt_l';
+const SLUG_RE = /^[a-z0-9-]{2,48}$/;
 
 // Ported from datalog public/js/script.js: personal data in URLs never leaves the device.
 export const PRIVATE_PARAM =
@@ -75,6 +83,7 @@ export function touchFromQuery(query: string): Touch {
     else if (k === 'ref') touch.ref = v;
     else if (k === 'via') via = v;
     else if (k === 'click_id') touch.click_id = v;
+    else if (k === AD_LINK_PARAM && SLUG_RE.test(v)) touch.link_slug = v;
     else if ((AD_PARAMS as readonly string[]).includes(k) && !UNFILLED_MACRO.test(v)) {
       touch[k as AdParam] = v.slice(0, AD_PARAM_MAX[k as AdParam]);
     }

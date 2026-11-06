@@ -139,6 +139,20 @@ describe('GET /l/:slug', () => {
 });
 
 describe('links API', () => {
+  it('stores a deep link URL and an integration, both validated', async () => {
+    const app = await createApp(cookie);
+    const now = Date.now();
+    await env.DB.prepare(`INSERT INTO integrations (id, app_id, provider, status, send_scope, config, created_at, updated_at) VALUES ('int-l1', ?, 'meta', 'draft', 'all', '{}', ?, ?)`)
+      .bind(app.id, now, now).run();
+    const ok = await createLink(app.id, { name: 'Spring', utm_source: 'meta', deep_link_url: 'absapp://onboarding/abs?plan=6', integration_id: 'int-l1' });
+    expect(ok.status).toBe(201);
+    expect(await ok.json()).toMatchObject({ deep_link_url: 'absapp://onboarding/abs?plan=6', integration_id: 'int-l1' });
+    for (const bad of ['javascript://x', 'onboarding', 'https://a b', 'data:text/html,x']) {
+      expect((await createLink(app.id, { name: 'x', utm_source: 'meta', deep_link_url: bad })).status).toBe(400);
+    }
+    expect((await createLink(app.id, { name: 'x', utm_source: 'meta', integration_id: 'not-mine' })).status).toBe(400);
+  });
+
   it('requires a session', async () => {
     expect((await call('/api/apps/x/links')).status).toBe(401);
     expect((await call('/api/apps/x/links', { method: 'POST', json: {} })).status).toBe(401);

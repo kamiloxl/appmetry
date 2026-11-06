@@ -90,6 +90,22 @@ Store and platform notes:
   remove it in your manifest with `tools:node="remove"`, and declare advertising-id use in the Play data safety form if
   you keep it.
 
+## Ad links and deferred deep links
+
+Ad links (dashboard → Integrations → Meta Ads → Ad links) can carry an in-app URL such as `myapp://onboarding/plan-6`.
+When a new install came from such a link, the SDK hands it to you once, so the first screen can match the ad:
+
+```ts
+useEffect(() => Appmetry.onDeferredDeepLink((link) => router.replace(link.url)), []);
+// link: { url, link, source, campaign, campaignId, adsetId, adId }
+```
+
+- It fires at most once per install, only within 24 h of the install, after attribution resolves (it waits up to
+  `waitMs`, default 5 s, then keeps checking in the background).
+- Android installs are matched through the Play Install Referrer. On iOS a new install is matched only when the app is
+  opened from the ad's deep link (`myapp://…?amt_l=<slug>`) or, once available, by the opt-in probabilistic match.
+- If the app was already installed, the ad's deep link opens it directly; the SDK attributes that open to the ad link.
+
 ## RevenueCat
 
 Call it after `Purchases.configure`, inside an async function (no top-level await), and before your first paywall:

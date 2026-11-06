@@ -33,6 +33,10 @@ describe('fromInstallReferrer', () => {
   it('reads ad ids from the referrer when there is no link', () => {
     expect(fromInstallReferrer('utm_source=meta&utm_medium=paid_social&campaign_id=7&ad_id=9', null)).toMatchObject({ campaign_id: '7', ad_id: '9', adset_id: null });
   });
+  it('carries the link id of the click', () => {
+    expect(fromInstallReferrer('click_id=c1', { click_id: 'c1', link_id: 'L1', utm_source: 'meta' })).toMatchObject({ link_id: 'L1' });
+    expect(fromInstallReferrer('utm_source=meta', null)).toMatchObject({ link_id: null });
+  });
   it('returns null for click_id-only referrer without link', () => {
     expect(fromInstallReferrer('click_id=abc', null)).toBeNull();
   });

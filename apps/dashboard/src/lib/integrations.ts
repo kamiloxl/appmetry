@@ -116,3 +116,30 @@ export function sourceOptions(builtin: string[], custom: string[], current: stri
 export function eventsManagerUrl(datasetId: string | null): string {
   return datasetId ? `https://business.facebook.com/events_manager2/list/dataset/${encodeURIComponent(datasetId)}/test_events` : 'https://business.facebook.com/events_manager2';
 }
+
+/**
+ * Meta's dynamic URL parameters for an ad's "URL parameters" field. Meta fills them on click; appmetry stores them on
+ * the click so installs and revenue land on the right campaign, ad set and ad.
+ */
+export const META_URL_PARAMS =
+  'utm_source=meta&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}}' +
+  '&campaign_id={{campaign.id}}&adset_id={{adset.id}}&ad_id={{ad.id}}&placement={{placement}}';
+
+/** The ad's deep link: the in-app URL plus `amt_l=<slug>`, so an open from the ad is credited to the ad link. */
+export function adDeepLink(url: string, slug: string): string {
+  const hash = url.indexOf('#');
+  const base = hash >= 0 ? url.slice(0, hash) : url;
+  const frag = hash >= 0 ? url.slice(hash) : '';
+  const sep = base.includes('?') ? (base.endsWith('?') || base.endsWith('&') ? '' : '&') : '?';
+  return `${base}${sep}amt_l=${encodeURIComponent(slug)}${frag}`;
+}
+
+/** Client-side check matching the server: `scheme://…`, no spaces, no script schemes. */
+export function deepLinkProblem(url: string): string | null {
+  const s = url.trim();
+  if (!s) return null;
+  if (/^(javascript|data|vbscript|file|blob):/i.test(s) || !/^[a-z][a-z0-9+.-]{1,30}:\/\/\S{0,300}$/i.test(s)) {
+    return 'Use your app link, e.g. myapp://onboarding or https://example.com/app/…';
+  }
+  return null;
+}

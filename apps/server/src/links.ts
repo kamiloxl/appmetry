@@ -22,6 +22,10 @@ type Link = {
   utm_campaign: string | null;
   utm_content: string | null;
   ref: string | null;
+  /** In-app URL the ad opens (custom scheme or universal link), for deep links and personalised journeys. */
+  deep_link_url: string | null;
+  /** The ad-network integration this link was made for. */
+  integration_id: string | null;
   created_at: number;
 };
 
@@ -48,6 +52,18 @@ function optional(field: string) {
   };
 }
 
+/** A deep link: `scheme://…` (custom scheme or https universal link), no whitespace, never a script scheme. */
+const DEEP_LINK_RE = /^[a-z][a-z0-9+.-]{1,30}:\/\/\S{0,300}$/i;
+const UNSAFE_SCHEMES = /^(javascript|data|vbscript|file|blob):/i;
+
+function parseDeepLink(v: unknown): Parsed {
+  if (v === null || v === undefined || v === '') return { ok: true, value: null };
+  if (typeof v !== 'string') return bad('deep_link_url must be a string or null');
+  const s = v.trim();
+  if (!DEEP_LINK_RE.test(s) || UNSAFE_SCHEMES.test(s)) return bad('deep_link_url must look like myapp://path or https://…');
+  return { ok: true, value: s };
+}
+
 function parseSlug(v: unknown): Parsed {
   if (typeof v !== 'string') return bad('slug must be a string');
   const s = v.trim().toLowerCase();
@@ -62,7 +78,16 @@ const FIELDS: Record<string, (v: unknown) => Parsed> = {
   utm_campaign: optional('utm_campaign'),
   utm_content: optional('utm_content'),
   ref: optional('ref'),
+  deep_link_url: parseDeepLink,
 };
+
+/** integration_id must name one of this app's integrations. */
+async function checkIntegration(db: D1Database, appId: string, v: unknown): Promise<Parsed> {
+  if (v === null || v === undefined || v === '') return { ok: true, value: null };
+  if (typeof v !== 'string') return bad('integration_id must be a string or null');
+  const row = await db.prepare('SELECT id FROM integrations WHERE id = ? AND app_id = ?').bind(v, appId).first<{ id: string }>();
+  return row ? { ok: true, value: row.id } : bad('unknown integration_id');
+}
 
 async function readBody(req: Request): Promise<Record<string, unknown> | null> {
   const body = await req.json().catch(() => null);
@@ -168,6 +193,8 @@ linksRoutes.post('/api/apps/:id/links', async (c) => {
     if (!r.ok) return c.json({ error: r.error }, 400);
     values[field] = r.value;
   }
+  const integration = await checkIntegration(c.env.DB, app.id, body.integration_id);
+  if (!integration.ok) return c.json({ error: integration.error }, 400);
   let slug = randomId(4);
   if (body.slug !== undefined && body.slug !== null) {
     const r = parseSlug(body.slug);
@@ -185,13 +212,19 @@ linksRoutes.post('/api/apps/:id/links', async (c) => {
     utm_campaign: values.utm_campaign,
     utm_content: values.utm_content,
     ref: values.ref,
+    deep_link_url: values.deep_link_url,
+    integration_id: integration.value as string | null,
     created_at: Date.now(),
   };
   try {
     await c.env.DB.prepare(
-      'INSERT INTO links (id, app_id, slug, name, utm_source, utm_medium, utm_campaign, utm_content, ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      `INSERT INTO links (id, app_id, slug, name, utm_source, utm_medium, utm_campaign, utm_content, ref, deep_link_url, integration_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-      .bind(link.id, link.app_id, link.slug, link.name, link.utm_source, link.utm_medium, link.utm_campaign, link.utm_content, link.ref, link.created_at)
+      .bind(
+        link.id, link.app_id, link.slug, link.name, link.utm_source, link.utm_medium, link.utm_campaign, link.utm_content, link.ref,
+        link.deep_link_url, link.integration_id, link.created_at,
+      )
       .run();
   } catch (err) {
     if (isUniqueViolation(err)) return c.json({ error: 'slug_taken' }, 409);
@@ -216,6 +249,12 @@ linksRoutes.patch('/api/apps/:id/links/:linkId', async (c) => {
     if (!r.ok) return c.json({ error: r.error }, 400);
     sets.push(`${field} = ?`);
     values.push(r.value);
+  }
+  if ('integration_id' in body) {
+    const r = await checkIntegration(c.env.DB, app.id, body.integration_id);
+    if (!r.ok) return c.json({ error: r.error }, 400);
+    sets.push('integration_id = ?');
+    values.push(r.value as string | null);
   }
   if (sets.length) {
     try {

@@ -40,6 +40,10 @@ describe('url', () => {
     expect(t.campaign_ids).toHaveLength(1000);
     expect(t.adset_id).toBeUndefined();
   });
+  it('reads the ad link slug (amt_l) from a deep link', () => {
+    expect(extractTouch('absapp://onboarding/abs?amt_l=meta-spring&campaign_ids=ARF')).toEqual({ link_slug: 'meta-spring', campaign_ids: 'ARF' });
+    expect(extractTouch('absapp://x?amt_l=BAD SLUG!')).toBeNull();
+  });
   it('touchFromQuery parses a Play referrer', () => {
     expect(touchFromQuery('utm_source=google-play&utm_medium=organic')).toEqual({ utm_source: 'google-play', utm_medium: 'organic' });
   });

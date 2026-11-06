@@ -24,6 +24,8 @@ export interface InstallAttribution {
   ad_id: string | null;
   fbclid: string | null;
   campaign_ids: string | null;
+  /** The ad / tracked link that brought the install (for its deep link). */
+  link_id: string | null;
 }
 
 export interface AdServicesResult {
@@ -52,7 +54,7 @@ function base(method: AttributionMethod, source: string, channel: Channel): Inst
     utm_source: null, utm_medium: null, utm_campaign: null, utm_term: null, utm_content: null,
     ref: null, click_id: null,
     asa_campaign_id: null, asa_adgroup_id: null, asa_keyword_id: null,
-    campaign_id: null, adset_id: null, ad_id: null, fbclid: null, campaign_ids: null,
+    campaign_id: null, adset_id: null, ad_id: null, fbclid: null, campaign_ids: null, link_id: null,
   };
 }
 
@@ -72,6 +74,7 @@ function fromTouchWith(method: AttributionMethod, t: Touch): InstallAttribution 
     ad_id: t.ad_id ?? null,
     fbclid: t.fbclid ?? null,
     campaign_ids: t.campaign_ids ?? null,
+    link_id: t.link_id ?? null,
   };
 }
 
@@ -96,6 +99,7 @@ export function fromInstallReferrer(raw: string, link: LinkTouch | null): Instal
         placement: link.placement ?? parsed.placement,
         fbclid: link.fbclid ?? parsed.fbclid,
         campaign_ids: link.campaign_ids ?? parsed.campaign_ids,
+        link_id: link.link_id,
       }
     : parsed;
   if (t.utm_source?.toLowerCase() === 'google-play' && t.utm_medium?.toLowerCase() === 'organic') return null;
@@ -141,4 +145,10 @@ export interface AttributionResponse {
   asa_campaign_id: number | null;
   asa_adgroup_id: number | null;
   asa_keyword_id: number | null;
+  /** Ad-network ids of the click or deep link that brought the install. Missing from older servers. */
+  campaign_id?: string | null;
+  adset_id?: string | null;
+  ad_id?: string | null;
+  /** The ad link's in-app URL, for a personalised first screen (deferred deep link). */
+  deep_link?: { url: string; link: string } | null;
 }

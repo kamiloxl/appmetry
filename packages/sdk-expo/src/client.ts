@@ -1,4 +1,6 @@
-import { extractTouch, LIMITS, stripPrivateParams, type BatchContext, type EventType, type SdkEvent } from '@appmetry/shared';
+import {
+  extractTouch, LIMITS, stripPrivateParams, type AttributionResponse, type BatchContext, type EventType, type SdkEvent,
+} from '@appmetry/shared';
 import { randomUUID } from 'expo-crypto';
 import { AppState } from 'react-native';
 
@@ -30,6 +32,19 @@ export interface AppmetryOptions {
   adConsent?: boolean;
 }
 
+/** What an ad link opened for a new install (deferred deep link). */
+export interface DeferredDeepLink {
+  /** The ad link's in-app URL, as set in the dashboard. Route to it to personalise the first screen. */
+  url: string;
+  /** The ad link's slug. */
+  link: string;
+  source: string;
+  campaign: string | null;
+  campaignId: string | null;
+  adsetId: string | null;
+  adId: string | null;
+}
+
 export interface AppmetryApi {
   init(o: AppmetryOptions): void;
   track(name: string, props?: Record<string, unknown>): void;
@@ -41,6 +56,12 @@ export interface AppmetryApi {
    * Stored on the device. With `true`, the IDFA (iOS, only when ATT is authorized) or GAID (Android) is read and sent.
    */
   setAdConsent(granted: boolean): void;
+  /**
+   * Calls `cb` once if this new install came from an ad link with an in-app URL, so the app can open that screen.
+   * Fires at most once per install, only within 24 h of it, and only after attribution resolves (it waits up to
+   * `waitMs`, default 5000, then keeps checking in the background). Returns an unsubscribe.
+   */
+  onDeferredDeepLink(cb: (link: DeferredDeepLink) => void, o?: { waitMs?: number }): () => void;
   optIn(): void;
   optOut(): void;
   installId(): Promise<string | null>;
@@ -63,6 +84,12 @@ const KEY_INSTALLED = 'appmetry:installed';
 const KEY_AD_CONSENT = 'appmetry:ad_consent';
 /** What the server last heard about ad consent (consent, ATT status, id present), so changes are sent once. */
 const KEY_AD_STATE = 'appmetry:ad_state';
+/** When this device's install event was queued; deferred deep links only apply to fresh installs. */
+const KEY_INSTALLED_AT = 'appmetry:installed_at';
+/** Set once the deferred deep link was delivered or ruled out, so it never fires twice. */
+const KEY_DEFERRED = 'appmetry:deferred_link';
+const DEFERRED_MAX_AGE_MS = 24 * 3_600_000;
+const DEFAULT_DEFERRED_WAIT_MS = 5000;
 const DEFAULT_ATTRIBUTION_WAIT_MS = 3000;
 const DEFAULT_SESSION_TIMEOUT_MS = 5 * 60_000;
 const MAX_NAME = 255;
@@ -128,6 +155,8 @@ export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
   /** The `purchases` object last passed to syncRevenueCat, and whether it still waits for late attribution. */
   let lastPurchases: RevenueCatLike | null = null;
   let awaitingAttribution = false;
+  const deferredListeners = new Set<(link: DeferredDeepLink) => void>();
+  let deferredBusy = false;
 
   const appState = () => deps.appState ?? (AppState as unknown as NonNullable<AppmetryDeps['appState']>);
 
@@ -190,6 +219,38 @@ export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
     if (gen === generation) await store.set(KEY_AD_STATE, state);
   }
 
+  /** Deliver the deferred deep link from a resolved attribution, at most once per install. */
+  async function deliverDeferred(a: AttributionResponse | null, gen: number) {
+    if (!a || deferredBusy || gen !== generation || !enabled) return;
+    deferredBusy = true;
+    try {
+      if (await store.get(KEY_DEFERRED)) return;
+      const installedAt = Number(await store.get(KEY_INSTALLED_AT));
+      const fresh = Number.isFinite(installedAt) && installedAt > 0 && now() - installedAt <= DEFERRED_MAX_AGE_MS;
+      const dl = a.deep_link;
+      if (gen !== generation) return;
+      if (!fresh || !dl || typeof dl.url !== 'string' || !dl.url) {
+        await store.set(KEY_DEFERRED, 'none');
+        return;
+      }
+      if (!deferredListeners.size) return; // keep it for the first listener
+      await store.set(KEY_DEFERRED, 'delivered');
+      const link: DeferredDeepLink = {
+        url: dl.url, link: dl.link, source: a.source, campaign: a.utm_campaign,
+        campaignId: a.campaign_id ?? null, adsetId: a.adset_id ?? null, adId: a.ad_id ?? null,
+      };
+      for (const cb of [...deferredListeners]) {
+        try {
+          cb(link);
+        } catch (err) {
+          log('onDeferredDeepLink listener failed', err);
+        }
+      }
+    } finally {
+      deferredBusy = false;
+    }
+  }
+
   function onAppState(state: string) {
     const ts = now();
     void run(async () => {
@@ -243,6 +304,8 @@ export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
       }
       if (!alive()) return;
       const e: SdkEvent = { id: newId(), type: 'install', ts, sid: tracker.current() ?? newId() };
+      await store.set(KEY_INSTALLED_AT, String(ts));
+      if (!alive()) return;
       if (Object.keys(props).length > 0) e.props = props;
       // install belongs to the session that is about to start, so open it first.
       if (appState().currentState === 'active') {
@@ -311,6 +374,7 @@ export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
           },
         });
         attribution = new AttributionCache(store, { host: o.host, appKey: o.appKey, fetchFn: deps.fetchFn });
+        attribution.onResolved((a) => void deliverDeferred(a, generation));
         attribution.onResolved((a) => {
           const p = lastPurchases;
           if (!enabled || !p || !awaitingAttribution) return;
@@ -403,6 +467,27 @@ export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
       });
     },
 
+    onDeferredDeepLink(cb, o) {
+      if (typeof cb !== 'function') return () => {};
+      deferredListeners.add(cb);
+      const waitMs = typeof o?.waitMs === 'number' && o.waitMs >= 0 ? o.waitMs : DEFAULT_DEFERRED_WAIT_MS;
+      void (async () => {
+        try {
+          if (disabled) return;
+          // Look up the iid inside the chain, but wait on the network outside it.
+          const ctx = await run((gen) => (enabled && activated && iid ? { iid, gen } : null));
+          if (!ctx || ctx.gen !== generation) return;
+          if (await store.get(KEY_DEFERRED)) return;
+          await deliverDeferred((await attribution?.get(ctx.iid, waitMs)) ?? null, ctx.gen);
+        } catch (err) {
+          log('onDeferredDeepLink failed', err);
+        }
+      })();
+      return () => {
+        deferredListeners.delete(cb);
+      };
+    },
+
     optIn() {
       void run(async (gen) => {
         await cleanup; // a pending opt-out cleanup must finish before consent is granted again
@@ -439,6 +524,8 @@ export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
           store.remove(KEY_IID),
           store.remove(KEY_INSTALLED),
           store.remove(KEY_AD_STATE),
+          store.remove(KEY_INSTALLED_AT),
+          store.remove(KEY_DEFERRED),
           store.remove(ATTRIBUTION_KEY),
           queue.clear(),
         ]).catch((err: unknown) => log('optOut cleanup failed', err));

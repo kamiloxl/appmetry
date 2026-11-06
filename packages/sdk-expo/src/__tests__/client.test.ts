@@ -58,13 +58,19 @@ afterEach(async () => {
 });
 
 function setup(
-  opts: { os?: string; state?: string; kv?: MemoryKV; status?: number; hang?: boolean; adSignals?: (c: boolean) => Promise<AdSignals> } = {},
+  opts: {
+    os?: string; state?: string; kv?: MemoryKV; status?: number; hang?: boolean; adSignals?: (c: boolean) => Promise<AdSignals>;
+    attribution?: unknown;
+  } = {},
 ) {
   const kv = opts.kv ?? new MemoryKV();
   const appState = fakeAppState(opts.state ?? 'active');
   const bodies: Batch[] = [];
   const signals: AbortSignal[] = [];
   const fetchFn = jest.fn(async (_u: unknown, init?: RequestInit) => {
+    if (String(_u).includes('/api/v1/attribution')) {
+      return { status: opts.attribution ? 200 : 404, json: async () => opts.attribution } as unknown as Response;
+    }
     if (opts.hang) {
       if (init?.signal) signals.push(init.signal);
       return new Promise<Response>(() => {});
@@ -466,3 +472,59 @@ describe('ad consent', () => {
     expect(a.fetchFn).not.toHaveBeenCalled();
   });
 });
+
+describe('onDeferredDeepLink', () => {
+  const attribution = (deepLink: unknown) => ({
+    resolved: true, method: 'install_referrer', source: 'meta', channel: 'Paid', utm_campaign: 'spring', utm_content: null, utm_term: null,
+    asa_campaign_id: null, asa_adgroup_id: null, asa_keyword_id: null, campaign_id: '120', adset_id: '121', ad_id: '122', deep_link: deepLink,
+  });
+
+  it('delivers the ad link once for a new install', async () => {
+    const store = new MemoryKV();
+    const a = setup({ kv: store, attribution: attribution({ url: 'absapp://onboarding/abs', link: 'meta-spring' }) });
+    a.api.init(init);
+    await settle();
+    const got: unknown[] = [];
+    a.api.onDeferredDeepLink((l) => got.push(l));
+    await settle();
+    expect(got).toEqual([
+      { url: 'absapp://onboarding/abs', link: 'meta-spring', source: 'meta', campaign: 'spring', campaignId: '120', adsetId: '121', adId: '122' },
+    ]);
+
+    // Another listener, or the next launch, never gets it again.
+    a.api.onDeferredDeepLink((l) => got.push(l));
+    await settle();
+    const b = setup({ kv: store, attribution: attribution({ url: 'absapp://onboarding/abs', link: 'meta-spring' }) });
+    b.api.init(init);
+    await settle();
+    b.api.onDeferredDeepLink((l) => got.push(l));
+    await settle();
+    expect(got).toHaveLength(1);
+  });
+
+  it('does nothing without a deep link, and remembers that', async () => {
+    const store = new MemoryKV();
+    const a = setup({ kv: store, attribution: attribution(null) });
+    a.api.init(init);
+    await settle();
+    const cb = jest.fn();
+    a.api.onDeferredDeepLink(cb);
+    await settle();
+    expect(cb).not.toHaveBeenCalled();
+    expect(store.map.get('appmetry:deferred_link')).toBe('none');
+  });
+
+  it('ignores installs older than 24 hours (e.g. an SDK update on an old install)', async () => {
+    const store = new MemoryKV();
+    store.map.set('appmetry:installed_at', String(1_700_000_000_000 - 25 * 3_600_000));
+    store.map.set('appmetry:installed', '1');
+    const a = setup({ kv: store, attribution: attribution({ url: 'absapp://x', link: 'l1' }) });
+    a.api.init(init);
+    await settle();
+    const cb = jest.fn();
+    a.api.onDeferredDeepLink(cb);
+    await settle();
+    expect(cb).not.toHaveBeenCalled();
+  });
+});
+

@@ -169,7 +169,7 @@ function storedEvent(e: SdkEvent): { name: string | null; props: string | null }
 export const ATTRIBUTION_COLUMNS = [
   'source', 'channel', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref', 'click_id',
   'asa_campaign_id', 'asa_adgroup_id', 'asa_keyword_id',
-  'campaign_id', 'adset_id', 'ad_id', 'fbclid', 'campaign_ids',
+  'campaign_id', 'adset_id', 'ad_id', 'fbclid', 'campaign_ids', 'link_id',
 ] as const;
 
 function attributionValues(a: InstallAttribution): Array<string | number | null> {
@@ -200,6 +200,7 @@ export function rowToAttribution(row: InstallAttrRow): InstallAttribution {
     ad_id: row.ad_id,
     fbclid: row.fbclid,
     campaign_ids: row.campaign_ids,
+    link_id: row.link_id,
   };
 }
 
@@ -284,13 +285,52 @@ WHERE app_id = ?1 AND id = ?2`;
 
 type LinkTouch = { e: SdkEvent; touch: NonNullable<ReturnType<typeof extractTouch>> };
 
-/** Deep links in `events` (ts order) that carry a touch, read from the cleaned URL. */
-function deepLinkTouches(events: SdkEvent[]): LinkTouch[] {
+type AdLinkRow = { id: string; slug: string; utm_source: string | null; utm_medium: string | null; utm_campaign: string | null; utm_content: string | null; ref: string | null };
+/** Ad links named by deep links in a batch (`amt_l`), by slug. Only this app's links. */
+type AdLinks = Map<string, AdLinkRow>;
+
+async function adLinksFor(db: D1Database, appId: string, events: SdkEvent[]): Promise<AdLinks> {
+  const slugs = new Set<string>();
+  for (const e of events) {
+    if (e.type !== 'deep_link' || !e.name) continue;
+    const slug = extractTouch(stripPrivateParams(e.name))?.link_slug;
+    if (slug) slugs.add(slug);
+  }
+  if (!slugs.size) return new Map();
+  const { results } = await db
+    .prepare(
+      `SELECT id, slug, utm_source, utm_medium, utm_campaign, utm_content, ref FROM links
+       WHERE app_id = ? AND slug IN (SELECT value FROM json_each(?))`,
+    )
+    .bind(appId, JSON.stringify([...slugs]))
+    .all<AdLinkRow>();
+  return new Map(results.map((r) => [r.slug, r]));
+}
+
+/**
+ * Deep links in `events` (ts order) that carry a touch, read from the cleaned URL. A deep link naming one of the app's
+ * ad links (`amt_l`) takes the link's values where the URL has none, and the link id; an unknown slug is dropped.
+ */
+function deepLinkTouches(events: SdkEvent[], adLinks: AdLinks = new Map()): LinkTouch[] {
   const out: LinkTouch[] = [];
   for (const e of events) {
     if (e.type !== 'deep_link' || !e.name) continue;
     const touch = extractTouch(stripPrivateParams(e.name));
-    if (touch) out.push({ e, touch });
+    if (!touch) continue;
+    const { link_slug, ...rest } = touch;
+    const link = link_slug ? adLinks.get(link_slug) : undefined;
+    const merged = link
+      ? {
+          ...rest,
+          utm_source: rest.utm_source ?? link.utm_source ?? undefined,
+          utm_medium: rest.utm_medium ?? link.utm_medium ?? undefined,
+          utm_campaign: rest.utm_campaign ?? link.utm_campaign ?? undefined,
+          utm_content: rest.utm_content ?? link.utm_content ?? undefined,
+          ref: rest.ref ?? link.ref ?? undefined,
+          link_id: link.id,
+        }
+      : rest;
+    if (Object.values(merged).some((v) => v !== undefined)) out.push({ e, touch: merged });
   }
   return out;
 }
@@ -333,10 +373,11 @@ export async function ingestBatch(
     .all<{ id: string }>();
   const known = new Set(existing.results.map((r) => r.id));
   const fresh = events.filter((e) => !known.has(e.id));
+  const adLinks = await adLinksFor(db, app.id, events);
   if (!fresh.length) {
     // Everything is stored already, but a previous attempt may have died before the attribution follow-up.
     await runOnInstall(onInstall, iid, events);
-    await upgradeAttribution(db, app.id, iid, events);
+    await upgradeAttribution(db, app.id, iid, events, adLinks);
     return { inserted: 0, dropped, events: [] };
   }
 
@@ -405,7 +446,7 @@ export async function ingestBatch(
 
   // 4b. Session source from its first deep link with a touch (only while still Direct), then aggregates.
   for (const [sid, list] of bySession) {
-    const first = deepLinkTouches(list)[0];
+    const first = deepLinkTouches(list, adLinks)[0];
     if (first) {
       const { source, channel } = classify({ utmSource: first.touch.utm_source, utmMedium: first.touch.utm_medium, ref: first.touch.ref });
       if (channel !== 'Direct') {
@@ -454,7 +495,7 @@ export async function ingestBatch(
 
   // 7b. Attribution upgrades from every valid event in the batch, not only new ones: if a previous attempt
   // committed and then died, its retry still applies the upgrade. mergeAttribution makes this idempotent.
-  await upgradeAttribution(db, app.id, iid, events);
+  await upgradeAttribution(db, app.id, iid, events, adLinks);
 
   return { inserted: inserted.length, dropped, events: inserted };
 }
@@ -472,9 +513,9 @@ async function runOnInstall(onInstall: OnInstall, iid: string, events: SdkEvent[
 }
 
 /** Apply a reported source, or a deep link in the install's earliest session, when it beats the current method. */
-async function upgradeAttribution(db: D1Database, appId: string, iid: string, events: SdkEvent[]): Promise<void> {
+async function upgradeAttribution(db: D1Database, appId: string, iid: string, events: SdkEvent[], adLinks: AdLinks): Promise<void> {
   const sources = events.filter((e) => e.type === 'source' && e.name && e.name.trim());
-  const links = deepLinkTouches(events);
+  const links = deepLinkTouches(events, adLinks);
   if (!sources.length && !links.length) return;
 
   const candidates: Array<{ ts: number; a: InstallAttribution }> = sources.map((e) => ({ ts: e.ts, a: fromReported(e.name!) }));
