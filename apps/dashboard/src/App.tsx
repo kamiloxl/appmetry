@@ -5,6 +5,8 @@ import { api } from './lib/api';
 import type { Me } from './lib/types';
 import { Apps } from './pages/Apps';
 import { Customers } from './pages/Customers';
+import { IntegrationMeta } from './pages/IntegrationMeta';
+import { Integrations } from './pages/Integrations';
 import { Links } from './pages/Links';
 import { Login } from './pages/Login';
 import { Overview } from './pages/Overview';
@@ -79,6 +81,8 @@ export function App() {
           <Route index element={<Overview />} />
           <Route path="customers" element={<Customers />} />
           <Route path="links" element={<Links />} />
+          <Route path="integrations" element={<Integrations />} />
+          <Route path="integrations/meta" element={<IntegrationMeta />} />
           <Route path="settings" element={<Settings />} />
           <Route path="setup" element={<Setup />} />
         </Route>
