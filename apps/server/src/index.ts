@@ -24,7 +24,8 @@ import { customers, installTimeline } from './stats/customers';
 import { isDim, statsContext, type StatsCtx } from './stats/filters';
 import { linkFunnel } from './stats/links';
 import { overview } from './stats/overview';
-import { runDaily } from './cron';
+import { QUERY_BUDGET, runDaily } from './cron';
+import { dispatchDue } from './integrations/dispatch';
 import { notFound, onError, securityHeaders } from './errors';
 import { privacyRoutes } from './privacy';
 import { handleRevenueCat, revenuecatRoutes } from './revenuecat';
@@ -135,15 +136,25 @@ app.get('/api/apps/:id/stats/breakdown', async (c) => {
 app.notFound(notFound);
 app.onError(onError);
 
+/** Ad-network postbacks per cron tick, and the queries that costs (purge batch, select, claim, read, write batch). */
+const POSTBACKS_PER_TICK = 50;
+const POSTBACK_QUERY_COST = 5;
+
 async function scheduled(controller: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-  // Independent jobs: one failing must not stop the other.
+  // Every 5 minutes. Independent jobs: one failing must not stop the others.
+  try {
+    await dispatchDue(env, controller.scheduledTime, POSTBACKS_PER_TICK);
+  } catch (err) {
+    console.error('postback dispatch failed', err instanceof Error ? err.message : 'unknown error');
+  }
   try {
     await purgeLoginFailures(env.DB, controller.scheduledTime);
   } catch (err) {
     console.error('purgeLoginFailures failed', err instanceof Error ? err.message : 'unknown error');
   }
   try {
-    await runDaily(env, controller.scheduledTime);
+    // runDaily processes each app at most once per 23 h, so running it every tick only costs its two lookups.
+    await runDaily(env, controller.scheduledTime, undefined, QUERY_BUDGET - POSTBACK_QUERY_COST - 1);
   } catch (err) {
     console.error('runDaily failed', err instanceof Error ? err.message : 'unknown error');
   }

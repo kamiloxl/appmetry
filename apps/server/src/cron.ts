@@ -13,7 +13,7 @@ const REMATCH_CALLS_PER_APP = 5;
 export const QUERY_BUDGET = 40;
 /** Query cost of resolveAsaToken (apply + clear + fetch, rounded up) and of rematch. */
 const ASA_COST = 6; // 5 statements + 1 Apple fetch
-const REMATCH_BASE = 3; // read, count, batch call; plus 3 statements per candidate
+const REMATCH_BASE = 6; // read, count, batch call, plus up to 3 for queueing ad-network postbacks; 3 statements per candidate
 const REMATCH_PER_CANDIDATE = 3;
 const REMATCH_LIMIT = 20;
 const MIN_INTERVAL_MS = 23 * 3_600_000;

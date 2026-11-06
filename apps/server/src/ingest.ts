@@ -19,6 +19,8 @@ import {
 import { sanitizeInstallProps, makeOnInstall } from './attribution';
 import { getAppByKey, type AppEnv, type AppRow } from './env';
 import { parseKeys, seal, type SealKeys } from './lib/sealed';
+import { madidContext } from './integrations/enqueue';
+import { queueAndSend, sdkSourceEvents, transientFrom } from './integrations/hooks';
 
 /** City-level location from `request.cf`. Nothing else about the request is stored (spec §7). */
 export interface Geo {
@@ -131,6 +133,8 @@ export async function handleBatch(c: Context<AppEnv>): Promise<Response> {
   const now = Date.now();
   const onInstall = makeOnInstall(c.env.DB, app, c.executionCtx.waitUntil.bind(c.executionCtx), now);
   const result = await ingestBatch(c.env.DB, app, v.batch, geoFrom(c.req.raw), now, onInstall, { keys: parseKeys(c.env) });
+  const postbacks = sdkSourceEvents(v.batch.context.iid, result.events, transientFrom(c.req.raw));
+  if (postbacks.length) c.executionCtx.waitUntil(queueAndSend(c.env, app, postbacks, now));
   return c.json({ inserted: result.inserted, dropped: result.dropped + v.dropped }, 202);
 }
 
@@ -222,8 +226,6 @@ function consentFrom(e: SdkEvent): Consent | null {
   return { ts: e.ts, adConsent: p.adConsent, att, madid };
 }
 
-/** The sealing context for an install's advertising id: the value only opens for this app and install. */
-export const madidContext = (appId: string, iid: string) => `install:${appId}:${iid}:madid`;
 
 /**
  * Write the latest ad consent in the batch. The advertising id is kept only with consent (on iOS only when ATT is
@@ -305,7 +307,7 @@ export async function ingestBatch(
   now: number,
   onInstall: OnInstall = noopOnInstall,
   opts: { keys?: SealKeys | null } = {},
-): Promise<{ inserted: number; dropped: number }> {
+): Promise<{ inserted: number; dropped: number; events: SdkEvent[] }> {
   const ctx = batch.context;
   const iid = ctx.iid;
 
@@ -322,7 +324,7 @@ export async function ingestBatch(
     inBatch.add(e.id);
     events.push(e);
   }
-  if (!events.length) return { inserted: 0, dropped };
+  if (!events.length) return { inserted: 0, dropped, events: [] };
 
   // 2. Skip events we already have: this is what makes a retried batch safe.
   const existing = await db
@@ -335,7 +337,7 @@ export async function ingestBatch(
     // Everything is stored already, but a previous attempt may have died before the attribution follow-up.
     await runOnInstall(onInstall, iid, events);
     await upgradeAttribution(db, app.id, iid, events);
-    return { inserted: 0, dropped };
+    return { inserted: 0, dropped, events: [] };
   }
 
   const firstTs = fresh[0].ts;
@@ -454,7 +456,7 @@ export async function ingestBatch(
   // committed and then died, its retry still applies the upgrade. mergeAttribution makes this idempotent.
   await upgradeAttribution(db, app.id, iid, events);
 
-  return { inserted: inserted.length, dropped };
+  return { inserted: inserted.length, dropped, events: inserted };
 }
 
 async function runOnInstall(onInstall: OnInstall, iid: string, events: SdkEvent[]): Promise<void> {

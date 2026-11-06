@@ -3,6 +3,9 @@ import { creditedSessionId, creditSql, installAttr, matchInstall, type MatchedBy
 import { type AppEnv, getAppById } from './env';
 import { readCapped } from './ingest';
 import { safeEqual, sha256Hex } from './lib/crypto';
+import { enqueuePostbacks } from './integrations/enqueue';
+import { queueAndSend } from './integrations/hooks';
+import type { SourceEvent } from './integrations/types';
 
 /**
  * RevenueCat webhook (spec §5 "Payment matching", "Subscription lifecycle events", "Integration health").
@@ -215,7 +218,25 @@ export async function handleRevenueCat(c: Context<AppEnv>): Promise<Response> {
     return c.json({ error: 'internal error' }, 500);
   }
   if (results[0].meta.changes === 0) return c.json({ ok: true, duplicate: true });
+  if (installId && lifecycleName) {
+    const source: SourceEvent = {
+      id: `rc_${id}`, installId, name: lifecycleName, ts: rcTs, valueCents: amountCents(event), currency: 'USD', sandbox: environment === 'SANDBOX',
+    };
+    c.executionCtx.waitUntil(queueAndSend(c.env, app, [source], now));
+  }
   return c.json({ ok: true });
+}
+
+/** The ad-network event for a stored lifecycle event (rematch), with value and sandbox flag from its props. */
+function rcSourceEvent(rcId: string, installId: string, ts: number, name: string, propsJson: string | null): SourceEvent {
+  let props: { price_usd?: unknown; sandbox?: unknown } = {};
+  try {
+    props = JSON.parse(propsJson ?? '{}') ?? {};
+  } catch {
+    // no value
+  }
+  const usd = typeof props.price_usd === 'number' && Number.isFinite(props.price_usd) ? props.price_usd : 0;
+  return { id: `rc_${rcId}`, installId, name, ts, valueCents: Math.round(usd * 100), currency: 'USD', sandbox: props.sandbox === true };
 }
 
 /** Integration health over the last 24 h of production deliveries. TEST events never count. */
@@ -320,9 +341,22 @@ export async function rematch(db: D1Database, appId: string, sinceTs: number, li
   }
 
   let matched = 0;
+  const postbacks: SourceEvent[] = [];
   if (statements.length) {
     const res = await db.batch(statements);
-    for (const i of rcUpdates) matched += res[i].meta.changes;
+    results.forEach((r, k) => {
+      const changed = res[rcUpdates[k]].meta.changes;
+      matched += changed;
+      if (changed && r.lifecycle_name) postbacks.push(rcSourceEvent(r.id, r.install_id, r.ts, r.lifecycle_name, r.lifecycle_props));
+    });
+  }
+  if (postbacks.length) {
+    // Queued only: the cron sends them. Never fails the rematch.
+    try {
+      await enqueuePostbacks(db, null, appId, postbacks, Date.now());
+    } catch (err) {
+      console.error('rematch: queueing ad-network postbacks failed', err instanceof Error ? err.name : 'unknown error');
+    }
   }
   const remaining =
     (await db.prepare(`SELECT COUNT(*) AS n FROM rc_events r ${REMATCH_WHERE}`).bind(appId, sinceTs).first<number>('n')) ?? 0;

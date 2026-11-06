@@ -398,7 +398,7 @@ describe('POST /api/v1/batch', () => {
     const res = await ingestBatch(env.DB, app, { context: context() as never, events: [link] }, GEO, Date.now(), async (_iid, e) => {
       calls.push(e.id);
     });
-    expect(res).toEqual({ inserted: 0, dropped: 0 });
+    expect(res).toEqual({ inserted: 0, dropped: 0, events: [] });
     expect(await install(app)).toMatchObject({ attribution_method: 'deep_link', source: 'Google', utm_campaign: 'c1' });
 
     // A retry of an install batch fires onInstall again (R16: the hook is idempotent).
