@@ -36,6 +36,10 @@ export function number(n: number): string {
   return new Intl.NumberFormat('en').format(Math.round(n));
 }
 
+export function dateTimeLabel(ts: number): string {
+  return new Intl.DateTimeFormat('en', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(ts);
+}
+
 export function dateLabel(ts: number): string {
   return new Intl.DateTimeFormat('en', { day: 'numeric', month: 'short', year: 'numeric' }).format(ts);
 }

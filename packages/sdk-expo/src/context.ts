@@ -2,7 +2,7 @@ import type { BatchContext, Platform as SdkPlatform } from '@appmetry/shared';
 import * as Application from 'expo-application';
 import * as Device from 'expo-device';
 import * as Localization from 'expo-localization';
-import { Platform } from 'react-native';
+import { Dimensions, PixelRatio, Platform } from 'react-native';
 
 import { log } from './log';
 
@@ -34,5 +34,27 @@ export function buildContext(iid: string, platform: SdkPlatform, sdkVersion: str
     timezone: safe(() => Localization.getCalendars()[0]?.timeZone),
     sdkVersion,
     bundleId: safe(() => Application.applicationId),
+    ...deviceExtras(platform),
   };
+}
+
+/** Optional facts for ad-network postbacks (Meta `extinfo`): hardware model id and screen in physical pixels. */
+function deviceExtras(platform: SdkPlatform): Partial<BatchContext> {
+  const out: Partial<BatchContext> = {};
+  try {
+    const modelId = platform === 'ios' ? Device.modelId : null;
+    if (typeof modelId === 'string' && modelId) out.deviceModelId = modelId;
+    const { width, height } = Dimensions.get('screen');
+    const density = PixelRatio.get();
+    if (density > 0 && density <= 10) {
+      out.screenDensity = Math.round(density * 100) / 100;
+      if (width > 0 && height > 0) {
+        out.screenWidth = Math.round(width * density);
+        out.screenHeight = Math.round(height * density);
+      }
+    }
+  } catch (err) {
+    log('context: could not read device extras', err);
+  }
+  return out;
 }

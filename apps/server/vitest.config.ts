@@ -12,6 +12,8 @@ export default defineConfig({
       miniflare: {
         bindings: {
           ADMIN_PASSWORD: 'test-password-12',
+          // Test-only key (32 bytes of 0x07, base64). Never used outside tests.
+          INTEGRATIONS_KEY: 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=',
           TEST_MIGRATIONS: await readD1Migrations(migrationsDir),
         },
       },

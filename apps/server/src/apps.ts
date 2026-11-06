@@ -10,7 +10,10 @@ const ID_MAX = 255;
 const NAME_MAX = 100;
 
 /** Tables holding an `app_id` column. Deleted with the app. */
-const CHILD_TABLES = ['installs', 'sessions', 'events', 'links', 'link_clicks', 'payments', 'rc_events', 'asa_names'] as const;
+const CHILD_TABLES = [
+  'installs', 'sessions', 'events', 'links', 'link_clicks', 'payments', 'rc_events', 'asa_names',
+  'integrations', 'integration_mappings', 'postback_outbox', 'integration_audit',
+] as const;
 
 type Parsed = { ok: true; value: string | number | null } | { ok: false; error: string };
 const bad = (error: string): Parsed => ({ ok: false, error });

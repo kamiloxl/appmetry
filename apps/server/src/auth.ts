@@ -115,3 +115,18 @@ export async function ipHash(env: Env, ip: string): Promise<string> {
 export async function purgeLoginFailures(db: D1Database, now = Date.now()): Promise<void> {
   await db.prepare('DELETE FROM login_failures WHERE ts < ?').bind(now - LOCKOUT_MS).run();
 }
+
+// ---------- CSRF defence for cookie-authenticated writes
+
+/**
+ * Rejects state-changing requests that a browser marks as coming from another site. The login cookie is SameSite=Lax,
+ * which already blocks most of these; this also covers same-site subdomains and older browsers.
+ */
+export const sameOrigin: MiddlewareHandler<AppEnv> = async (c, next) => {
+  if (c.req.method === 'GET' || c.req.method === 'HEAD' || c.req.method === 'OPTIONS') return next();
+  const origin = c.req.header('origin');
+  if (origin && origin !== new URL(c.req.url).origin) return c.json({ error: 'cross_origin_request' }, 403);
+  const site = c.req.header('sec-fetch-site');
+  if (site && site !== 'same-origin' && site !== 'none') return c.json({ error: 'cross_origin_request' }, 403);
+  return next();
+};

@@ -1,4 +1,4 @@
-export const EVENT_TYPES = ['install', 'session_start', 'screen', 'event', 'deep_link', 'identify', 'source', 'ping'] as const;
+export const EVENT_TYPES = ['install', 'session_start', 'screen', 'event', 'deep_link', 'identify', 'source', 'ping', 'consent'] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 export type Platform = 'ios' | 'android';
 
@@ -13,6 +13,11 @@ export interface SdkEvent {
 // install.props:  { referrer?: string; referrerClickTs?: number; installBeginTs?: number; asaToken?: string }
 // screen/event/source.name = screen / event name / reported answer; deep_link.name = cleaned URL
 // identify.props: { userId?: string; email?: string; name?: string };  ping.props: { ms: number }
+// install.props and consent.props also carry ad consent: { adConsent: boolean; att?: AttStatus; madid?: string }.
+// `madid` (IDFA / GAID) is sent only with adConsent, and on iOS only when ATT is authorized; it never reaches `events`.
+
+export const ATT_STATUSES = ['authorized', 'denied', 'restricted', 'notDetermined'] as const;
+export type AttStatus = (typeof ATT_STATUSES)[number];
 
 export interface BatchContext {
   iid: string;
@@ -25,6 +30,11 @@ export interface BatchContext {
   timezone: string;
   sdkVersion: string;
   bundleId: string;
+  /** Optional device facts for ad-network postbacks (Meta `extinfo`). No personal data. */
+  deviceModelId?: string;
+  screenWidth?: number;
+  screenHeight?: number;
+  screenDensity?: number;
 }
 export interface Batch {
   context: BatchContext;
@@ -49,6 +59,14 @@ function validateContext(input: unknown): BatchContext | null {
     if (typeof v !== 'string') return null;
     out[f] = v.slice(0, LIMITS.maxName);
   }
+  // Optional fields: an invalid value is left out rather than failing the batch (older and newer SDKs coexist).
+  if (typeof input.deviceModelId === 'string' && input.deviceModelId) out.deviceModelId = input.deviceModelId.slice(0, 64);
+  for (const f of ['screenWidth', 'screenHeight'] as const) {
+    const v = input[f];
+    if (typeof v === 'number' && Number.isInteger(v) && v > 0 && v <= 20_000) out[f] = v;
+  }
+  const d = input.screenDensity;
+  if (typeof d === 'number' && Number.isFinite(d) && d > 0 && d <= 10) out.screenDensity = d;
   return out as unknown as BatchContext;
 }
 

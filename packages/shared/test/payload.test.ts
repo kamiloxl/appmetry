@@ -15,6 +15,22 @@ describe('validateBatch', () => {
     expect(r.ok).toBe(true);
     if (r.ok) { expect(r.dropped).toBe(0); expect(r.batch.events).toHaveLength(1); }
   });
+  it('accepts optional device extinfo fields and drops invalid ones', () => {
+    const r = validateBatch({ context: { ...context, deviceModelId: 'iPhone15,2', screenWidth: 1179, screenHeight: 2556, screenDensity: 3 }, events: [ev()] });
+    expect(r.ok && r.batch.context).toMatchObject({ deviceModelId: 'iPhone15,2', screenWidth: 1179, screenHeight: 2556, screenDensity: 3 });
+    const bad = validateBatch({ context: { ...context, deviceModelId: 5, screenWidth: -1, screenHeight: 1e9, screenDensity: 'x' }, events: [ev()] });
+    expect(bad.ok).toBe(true);
+    if (bad.ok) {
+      expect(bad.batch.context).not.toHaveProperty('deviceModelId');
+      expect(bad.batch.context).not.toHaveProperty('screenWidth');
+      expect(bad.batch.context).not.toHaveProperty('screenHeight');
+      expect(bad.batch.context).not.toHaveProperty('screenDensity');
+    }
+  });
+  it('accepts consent events', () => {
+    const r = validateBatch({ context, events: [ev({ type: 'consent', name: undefined, props: { adConsent: true, att: 'authorized' } })] });
+    expect(r.ok && r.batch.events[0].type).toBe('consent');
+  });
   it('rejects bad context', () => {
     expect(validateBatch({ context: { ...context, platform: 'web' }, events: [ev()] }).ok).toBe(false);
     expect(validateBatch({ context: { ...context, locale: 5 }, events: [ev()] }).ok).toBe(false);

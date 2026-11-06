@@ -6,7 +6,8 @@ export const ERASE_CHUNK = 500;
 
 /**
  * Statements that remove the given installs' personal data, in order: detach link clicks, anonymise payments and
- * rc_events (amounts, timestamps and product fields stay), then delete events, sessions and the installs.
+ * rc_events (amounts, timestamps and product fields stay), then delete queued/logged ad-network postbacks, events,
+ * sessions and the installs (which also removes their sealed advertising id).
  * Everything is scoped by `app_id`. `ids.length` must be at most ERASE_CHUNK.
  */
 export function eraseStatements(db: D1Database, appId: string, ids: string[]): D1PreparedStatement[] {
@@ -24,6 +25,7 @@ export function eraseStatements(db: D1Database, appId: string, ids: string[]): D
     // RevenueCat app_user_id can equal the install id (anonymous matching), also on rows that never matched.
     db.prepare(`UPDATE payments SET app_user_id = NULL WHERE app_id = ? AND app_user_id ${inIds}`).bind(appId, json),
     db.prepare(`UPDATE rc_events SET app_user_id = NULL WHERE app_id = ? AND app_user_id ${inIds}`).bind(appId, json),
+    db.prepare(`DELETE FROM postback_outbox WHERE app_id = ? AND install_id ${inIds}`).bind(appId, json),
     db.prepare(`DELETE FROM events WHERE app_id = ? AND install_id ${inIds}`).bind(appId, json),
     db.prepare(`DELETE FROM sessions WHERE app_id = ? AND install_id ${inIds}`).bind(appId, json),
     db.prepare(`DELETE FROM installs WHERE app_id = ? AND id ${inIds}`).bind(appId, json),

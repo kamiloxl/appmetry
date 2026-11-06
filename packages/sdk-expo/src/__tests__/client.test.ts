@@ -1,6 +1,7 @@
 import type { Batch, SdkEvent } from '@appmetry/shared';
 
 import { createAppmetry } from '../client';
+import type { AdSignals } from '../native';
 import type { KV } from '../storage';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
@@ -56,12 +57,20 @@ afterEach(async () => {
   }
 });
 
-function setup(opts: { os?: string; state?: string; kv?: MemoryKV; status?: number; hang?: boolean } = {}) {
+function setup(
+  opts: {
+    os?: string; state?: string; kv?: MemoryKV; status?: number; hang?: boolean; adSignals?: (c: boolean) => Promise<AdSignals>;
+    attribution?: unknown;
+  } = {},
+) {
   const kv = opts.kv ?? new MemoryKV();
   const appState = fakeAppState(opts.state ?? 'active');
   const bodies: Batch[] = [];
   const signals: AbortSignal[] = [];
   const fetchFn = jest.fn(async (_u: unknown, init?: RequestInit) => {
+    if (String(_u).includes('/api/v1/attribution')) {
+      return { status: opts.attribution ? 200 : 404, json: async () => opts.attribution } as unknown as Response;
+    }
     if (opts.hang) {
       if (init?.signal) signals.push(init.signal);
       return new Promise<Response>(() => {});
@@ -78,6 +87,7 @@ function setup(opts: { os?: string; state?: string; kv?: MemoryKV; status?: numb
     newId: () => `id-${String(++n).padStart(6, '0')}-xxxx`,
     now: () => clock,
     os: opts.os ?? 'ios',
+    adSignals: opts.adSignals ?? (async (adConsent) => ({ adConsent })),
   });
   created.push(api);
   const sent = () => bodies.flatMap((b) => b.events);
@@ -373,3 +383,148 @@ describe('opt-out semantics', () => {
 function kv(a: { kv: MemoryKV }) {
   return a.kv;
 }
+
+describe('ad consent', () => {
+  const IDFA = '6D92078A-8246-4BA4-AE5B-76104861E7DC';
+  /** A device whose ATT status can change; the IDFA is returned only with consent and authorization. */
+  function device(att: AdSignals['att'] = 'notDetermined') {
+    const d = {
+      att,
+      signals: jest.fn(async (adConsent: boolean): Promise<AdSignals> => {
+        const s: AdSignals = { adConsent, att: d.att };
+        if (adConsent && d.att === 'authorized') s.madid = IDFA;
+        return s;
+      }),
+    };
+    return d;
+  }
+  const consentEvents = (evs: SdkEvent[]) => evs.filter((e) => e.type === 'consent');
+
+  it('the install event carries ad consent, false by default, and no id', async () => {
+    const a = setup({ adSignals: device('denied').signals });
+    a.api.init(init);
+    await settle();
+    await a.api.flush();
+    expect(a.sent().find((e) => e.type === 'install')?.props).toEqual({ adConsent: false, att: 'denied' });
+  });
+
+  it('the adConsent option sends the IDFA with the install when ATT is authorized', async () => {
+    const a = setup({ adSignals: device('authorized').signals });
+    a.api.init({ ...init, adConsent: true });
+    await settle();
+    await a.api.flush();
+    expect(a.sent().find((e) => e.type === 'install')?.props).toEqual({ adConsent: true, att: 'authorized', madid: IDFA });
+    expect(consentEvents(a.sent())).toHaveLength(0);
+  });
+
+  it('setAdConsent sends one consent event per change and is remembered', async () => {
+    const d = device('authorized');
+    const store = new MemoryKV();
+    const a = setup({ kv: store, adSignals: d.signals });
+    a.api.init(init);
+    await settle();
+    a.api.setAdConsent(true);
+    a.api.setAdConsent(true);
+    await settle();
+    await a.api.flush();
+    expect(consentEvents(a.sent()).map((e) => e.props)).toEqual([{ adConsent: true, att: 'authorized', madid: IDFA }]);
+    expect(store.map.get('appmetry:ad_consent')).toBe('1');
+
+    // A new launch with the option off still uses the stored choice, and sends nothing new.
+    const b = setup({ kv: store, adSignals: d.signals });
+    b.api.init({ ...init, adConsent: false });
+    await settle();
+    await b.api.flush();
+    expect(consentEvents(b.sent())).toHaveLength(0);
+    expect(d.signals).toHaveBeenLastCalledWith(true);
+  });
+
+  it('an ATT change seen on foreground sends a consent event', async () => {
+    const d = device('notDetermined');
+    const a = setup({ adSignals: d.signals });
+    a.api.init({ ...init, adConsent: true });
+    await settle();
+    d.att = 'authorized';
+    a.appState.emit('background');
+    a.appState.emit('active');
+    await settle();
+    await a.api.flush();
+    expect(consentEvents(a.sent()).map((e) => e.props)).toEqual([{ adConsent: true, att: 'authorized', madid: IDFA }]);
+  });
+
+  it('withdrawing consent sends adConsent false without an id', async () => {
+    const a = setup({ adSignals: device('authorized').signals });
+    a.api.init({ ...init, adConsent: true });
+    await settle();
+    a.api.setAdConsent(false);
+    await settle();
+    await a.api.flush();
+    expect(consentEvents(a.sent()).map((e) => e.props)).toEqual([{ adConsent: false, att: 'authorized' }]);
+  });
+
+  it('sends nothing while analytics consent is withheld', async () => {
+    const a = setup({ adSignals: device('authorized').signals });
+    a.api.init({ ...init, requireConsent: true });
+    await settle();
+    a.api.setAdConsent(true);
+    await settle();
+    await a.api.flush();
+    expect(a.fetchFn).not.toHaveBeenCalled();
+  });
+});
+
+describe('onDeferredDeepLink', () => {
+  const attribution = (deepLink: unknown) => ({
+    resolved: true, method: 'install_referrer', source: 'meta', channel: 'Paid', utm_campaign: 'spring', utm_content: null, utm_term: null,
+    asa_campaign_id: null, asa_adgroup_id: null, asa_keyword_id: null, campaign_id: '120', adset_id: '121', ad_id: '122', deep_link: deepLink,
+  });
+
+  it('delivers the ad link once for a new install', async () => {
+    const store = new MemoryKV();
+    const a = setup({ kv: store, attribution: attribution({ url: 'absapp://onboarding/abs', link: 'meta-spring' }) });
+    a.api.init(init);
+    await settle();
+    const got: unknown[] = [];
+    a.api.onDeferredDeepLink((l) => got.push(l));
+    await settle();
+    expect(got).toEqual([
+      { url: 'absapp://onboarding/abs', link: 'meta-spring', source: 'meta', campaign: 'spring', campaignId: '120', adsetId: '121', adId: '122' },
+    ]);
+
+    // Another listener, or the next launch, never gets it again.
+    a.api.onDeferredDeepLink((l) => got.push(l));
+    await settle();
+    const b = setup({ kv: store, attribution: attribution({ url: 'absapp://onboarding/abs', link: 'meta-spring' }) });
+    b.api.init(init);
+    await settle();
+    b.api.onDeferredDeepLink((l) => got.push(l));
+    await settle();
+    expect(got).toHaveLength(1);
+  });
+
+  it('does nothing without a deep link, and remembers that', async () => {
+    const store = new MemoryKV();
+    const a = setup({ kv: store, attribution: attribution(null) });
+    a.api.init(init);
+    await settle();
+    const cb = jest.fn();
+    a.api.onDeferredDeepLink(cb);
+    await settle();
+    expect(cb).not.toHaveBeenCalled();
+    expect(store.map.get('appmetry:deferred_link')).toBe('none');
+  });
+
+  it('ignores installs older than 24 hours (e.g. an SDK update on an old install)', async () => {
+    const store = new MemoryKV();
+    store.map.set('appmetry:installed_at', String(1_700_000_000_000 - 25 * 3_600_000));
+    store.map.set('appmetry:installed', '1');
+    const a = setup({ kv: store, attribution: attribution({ url: 'absapp://x', link: 'l1' }) });
+    a.api.init(init);
+    await settle();
+    const cb = jest.fn();
+    a.api.onDeferredDeepLink(cb);
+    await settle();
+    expect(cb).not.toHaveBeenCalled();
+  });
+});
+
