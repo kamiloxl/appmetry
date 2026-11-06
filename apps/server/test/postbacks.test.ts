@@ -21,6 +21,9 @@ const fake: PostbackAdapter = {
   provider: 'fake',
   maxBatch: 2,
   allowedHosts: ['fake.example'],
+  targetEvents: [],
+  defaultMappings: [],
+  missingConfig: () => null,
   isAttributedTo: (i) => i.utm_source === 'fake',
   async buildRequest(ctx, events) {
     sentBatches.push({ ctx, events });

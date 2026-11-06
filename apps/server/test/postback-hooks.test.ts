@@ -21,6 +21,9 @@ const hookAdapter: PostbackAdapter = {
   provider: 'hookfake',
   maxBatch: 100,
   allowedHosts: ['hookfake.example'],
+  targetEvents: [],
+  defaultMappings: [],
+  missingConfig: () => null,
   isAttributedTo: () => true,
   async buildRequest(_ctx, events) {
     sent.push(...events);

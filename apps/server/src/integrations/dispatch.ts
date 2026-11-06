@@ -48,6 +48,8 @@ type Row = {
   config: string | null;
   token_enc: string | null;
   madid_enc: string | null;
+  ios_bundle_id: string | null;
+  android_package: string | null;
 } & { [K in `i_${keyof PostbackInstall}`]: unknown };
 
 const INSTALL_FIELDS = [
@@ -103,12 +105,14 @@ async function toEvent(row: Row, keys: SealKeys | null): Promise<OutboxEvent> {
     valueCents: row.value_cents,
     currency: row.currency,
     install,
+    bundleId: install?.platform === 'android' ? row.android_package : install?.platform === 'ios' ? row.ios_bundle_id : null,
     madid: row.install_id ? await openOrNull(keys, row.madid_enc, madidContext(row.app_id, row.install_id)) : null,
     transient,
   };
 }
 
-async function send(
+/** One request to a network, with the host allowlist, timeout and redaction. Also used by the test-event route. */
+export async function send(
   adapterProvider: string,
   integrationId: string,
   config: IntegrationConfig,
@@ -176,8 +180,10 @@ export async function dispatch(env: Env, ids: string[], deps: DispatchDeps = {})
       `SELECT o.id, o.app_id, o.integration_id, o.source_event_id, o.install_id, o.target_event, o.event_ts, o.value_cents, o.currency,
               o.transient_enc, o.attempts,
               g.provider, g.status AS integration_status, g.config, g.capi_token_enc AS token_enc,
-              n.madid_enc, ${INSTALL_FIELDS.map((f) => `n.${f} AS i_${f}`).join(', ')}
+              n.madid_enc, ${INSTALL_FIELDS.map((f) => `n.${f} AS i_${f}`).join(', ')},
+              a.ios_bundle_id, a.android_package
        FROM postback_outbox o
+       LEFT JOIN apps a ON a.id = o.app_id
        LEFT JOIN integrations g ON g.id = o.integration_id AND g.app_id = o.app_id
        LEFT JOIN installs n ON n.app_id = o.app_id AND n.id = o.install_id
        WHERE o.id IN (SELECT value FROM json_each(?))`,

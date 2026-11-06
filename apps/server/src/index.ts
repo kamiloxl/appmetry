@@ -26,6 +26,7 @@ import { linkFunnel } from './stats/links';
 import { overview } from './stats/overview';
 import { QUERY_BUDGET, runDaily } from './cron';
 import { dispatchDue } from './integrations/dispatch';
+import { integrationRoutes } from './integrations/routes';
 import { notFound, onError, securityHeaders } from './errors';
 import { privacyRoutes } from './privacy';
 import { handleRevenueCat, revenuecatRoutes } from './revenuecat';
@@ -97,6 +98,7 @@ app.route('/', linksRoutes);
 app.route('/', revenuecatRoutes);
 app.route('/', privacyRoutes);
 app.route('/', setupRoutes);
+app.route('/', integrationRoutes);
 
 // ---------- stats (read side of the Overview page)
 

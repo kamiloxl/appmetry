@@ -81,6 +81,8 @@ export interface OutboxEvent {
   valueCents: number | null;
   currency: string | null;
   install: PostbackInstall | null;
+  /** The app's bundle id / package for the install's platform (Meta extinfo). */
+  bundleId: string | null;
   /** IDFA / GAID, only when stored (consent, and ATT authorized on iOS). */
   madid: string | null;
   transient: { ip: string; ua: string } | null;
@@ -109,9 +111,18 @@ export interface PostbackAdapter {
   maxBatch: number;
   /** Hosts the adapter may call (checked before every request). */
   allowedHosts: readonly string[];
+  /** Event names offered in the mapping dropdown. Custom names are also accepted (see CUSTOM_EVENT_RE). */
+  targetEvents: readonly string[];
+  /** Mappings a new integration starts with. A locked one cannot be removed or retargeted. */
+  defaultMappings: readonly Mapping[];
+  /** Config fields this network needs before it can be activated; null when complete, else the missing field. */
+  missingConfig(config: IntegrationConfig): string | null;
   /** For send_scope = 'attributed': did this network bring the install? */
   isAttributedTo(install: PostbackInstall): boolean;
   /** One request for up to `maxBatch` events of one integration. */
   buildRequest(ctx: SendContext, events: OutboxEvent[]): Promise<{ url: string; init: RequestInit }>;
   classify(status: number, body: unknown): Classified;
 }
+
+/** A custom target event name: letters, digits, space, underscore and dash, up to 40 characters. */
+export const CUSTOM_EVENT_RE = /^[A-Za-z0-9_ -]{1,40}$/;

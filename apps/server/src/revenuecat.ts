@@ -57,6 +57,13 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 
 const isRefund = (ev: RcEvent) => ev.type === 'CANCELLATION' && ev.cancel_reason === 'CUSTOMER_SUPPORT';
 
+/** Every name lifecycleEventName can return, for the integrations' event catalog. */
+export const RC_LIFECYCLE_NAMES = [
+  'rc_trial_started', 'rc_intro_started', 'rc_subscription_started', 'rc_trial_converted', 'rc_subscription_renewed',
+  'rc_in_app_purchase', 'rc_refunded', 'rc_subscription_cancelled', 'rc_subscription_uncancelled', 'rc_billing_issue',
+  'rc_subscription_expired', 'rc_product_changed',
+] as const;
+
 /** Our event name for a RevenueCat event type (spec §5 mapping table), or null for types that are only logged. */
 export function lifecycleEventName(ev: RcEvent): string | null {
   switch (ev.type) {
