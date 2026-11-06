@@ -26,6 +26,7 @@ import { linkFunnel } from './stats/links';
 import { overview } from './stats/overview';
 import { QUERY_BUDGET, runDaily } from './cron';
 import { dispatchDue } from './integrations/dispatch';
+import { metaOAuthRoutes } from './integrations/meta-oauth';
 import { integrationRoutes } from './integrations/routes';
 import { notFound, onError, securityHeaders } from './errors';
 import { privacyRoutes } from './privacy';
@@ -99,6 +100,7 @@ app.route('/', revenuecatRoutes);
 app.route('/', privacyRoutes);
 app.route('/', setupRoutes);
 app.route('/', integrationRoutes);
+app.route('/', metaOAuthRoutes);
 
 // ---------- stats (read side of the Overview page)
 

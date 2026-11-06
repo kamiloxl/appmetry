@@ -11,6 +11,9 @@ export interface Env {
   INTEGRATIONS_KEY?: string;
   /** The previous INTEGRATIONS_KEY during a key rotation, so older values still open. */
   INTEGRATIONS_KEY_PREVIOUS?: string;
+  /** Optional Meta app for "Connect with Facebook" (dataset list). Without both, datasets are entered by hand. */
+  META_APP_ID?: string;
+  META_APP_SECRET?: string;
 }
 
 export interface AppRow {

@@ -5,6 +5,7 @@ import { randomId } from '../lib/crypto';
 import { open, parseKeys, seal } from '../lib/sealed';
 import { RC_LIFECYCLE_NAMES } from '../revenuecat';
 import { send, tokenContext } from './dispatch';
+import { oauthConfigured } from './meta-oauth';
 import { getAdapter, PROVIDERS } from './registry';
 import { forgetIntegrations } from './store';
 import { CUSTOM_EVENT_RE, type IntegrationConfig, type Mapping, type OutboxEvent, type PostbackAdapter } from './types';
@@ -34,6 +35,8 @@ type IntegrationRow = {
   send_scope: string;
   config: string;
   capi_token_enc: string | null;
+  oauth_token_enc: string | null;
+  oauth_expires_at: number | null;
   created_at: number;
   updated_at: number;
 };
@@ -74,7 +77,7 @@ async function mappingsOf(db: D1Database, row: IntegrationRow): Promise<Mapping[
 }
 
 /** What the dashboard sees. Never the credential. */
-function publicIntegration(row: IntegrationRow, mappings: Mapping[], stats: Stats | undefined, keysConfigured: boolean) {
+function publicIntegration(row: IntegrationRow, mappings: Mapping[], stats: Stats | undefined, keysConfigured: boolean, oauthAvailable = false) {
   const adapter = getAdapter(row.provider);
   const config = parseConfig(row.config);
   const hasToken = row.capi_token_enc !== null;
@@ -90,6 +93,9 @@ function publicIntegration(row: IntegrationRow, mappings: Mapping[], stats: Stat
     terms_accepted_at: typeof config.terms_accepted_at === 'number' ? config.terms_accepted_at : null,
     has_token: hasToken,
     keys_configured: keysConfigured,
+    oauth_available: oauthAvailable && row.provider === 'meta',
+    oauth_connected: row.oauth_token_enc !== null && (row.oauth_expires_at === null || row.oauth_expires_at > Date.now()),
+    oauth_expires_at: row.oauth_expires_at,
     missing: adapter?.missingConfig(config) ?? (hasToken ? null : 'token'),
     mappings,
     target_events: adapter?.targetEvents ?? [],
@@ -120,7 +126,7 @@ async function statsFor(db: D1Database, appId: string, now: number): Promise<Map
 async function respond(c: Context<AppEnv>, row: IntegrationRow, status: 200 | 201 = 200) {
   const db = c.env.DB;
   const [mappings, stats] = await Promise.all([mappingsOf(db, row), statsFor(db, row.app_id, Date.now())]);
-  return c.json(publicIntegration(row, mappings, stats.get(row.id), parseKeys(c.env) !== null), status);
+  return c.json(publicIntegration(row, mappings, stats.get(row.id), parseKeys(c.env) !== null, oauthConfigured(c.env)), status);
 }
 
 function defaultMappingStmts(db: D1Database, appId: string, integrationId: string, adapter: PostbackAdapter): D1PreparedStatement[] {
@@ -143,7 +149,8 @@ integrationRoutes.get('/api/apps/:id/integrations', async (c) => {
   const { results } = await db.prepare('SELECT * FROM integrations WHERE app_id = ? ORDER BY created_at').bind(app.id).all<IntegrationRow>();
   const stats = await statsFor(db, app.id, Date.now());
   const keys = parseKeys(c.env) !== null;
-  const integrations = await Promise.all(results.map(async (r) => publicIntegration(r, await mappingsOf(db, r), stats.get(r.id), keys)));
+  const oauth = oauthConfigured(c.env);
+  const integrations = await Promise.all(results.map(async (r) => publicIntegration(r, await mappingsOf(db, r), stats.get(r.id), keys, oauth)));
   return c.json({ providers: PROVIDERS, keys_configured: keys, integrations });
 });
 

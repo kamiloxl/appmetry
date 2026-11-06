@@ -59,3 +59,13 @@ describe('activation and errors', () => {
     expect(errorText('something else')).toBe('something else');
   });
 });
+
+describe('oauthNotice', () => {
+  it('turns the ?oauth= result into a banner', async () => {
+    const { oauthNotice } = await import('../src/lib/integrations');
+    expect(oauthNotice('connected')).toEqual({ ok: true, text: 'Connected to Facebook. Choose a dataset below.' });
+    expect(oauthNotice('denied')?.ok).toBe(false);
+    expect(oauthNotice(null)).toBeNull();
+    expect(oauthNotice('weird')).toBeNull();
+  });
+});

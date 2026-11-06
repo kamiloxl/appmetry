@@ -38,7 +38,28 @@ const ERRORS: Record<string, string> = {
   credential_unreadable: 'The saved token cannot be read. Paste it again.',
   already_exists: 'This network is already connected.',
   cross_origin_request: 'The request came from another site and was blocked.',
+  oauth_not_connected: 'Connect with Facebook first.',
+  oauth_expired: 'The Facebook connection expired. Connect again.',
+  meta_unavailable: 'Meta did not answer. Try again in a moment.',
 };
+
+/** The banner after returning from Facebook (`?oauth=…`), or null. */
+export function oauthNotice(result: string | null): { ok: boolean; text: string } | null {
+  switch (result) {
+    case 'connected':
+      return { ok: true, text: 'Connected to Facebook. Choose a dataset below.' };
+    case 'denied':
+      return { ok: false, text: 'Facebook access was not granted. You can still enter the dataset ID by hand.' };
+    case 'key_missing':
+      return { ok: false, text: errorText('integrations_key_missing') };
+    case 'not_configured':
+      return { ok: false, text: 'This server has no Meta app (META_APP_ID / META_APP_SECRET). Enter the dataset ID by hand.' };
+    case 'failed':
+      return { ok: false, text: 'Connecting to Facebook failed. Try again.' };
+    default:
+      return null;
+  }
+}
 
 export function errorText(code: string): string {
   return ERRORS[code] ?? code;

@@ -1,15 +1,16 @@
 import { ArrowRight, Trash2 } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Modal } from '../components/Modal';
 import { Field, Section } from '../components/ui';
 import { api } from '../lib/api';
 import { dateLabel, dateTimeLabel, money } from '../lib/format';
 import {
-  activationBlockers, errorText, eventLabel, eventsManagerUrl, mappingPayload, mappingProblem, newRow, sameMappings, sourceOptions, toRows,
+  activationBlockers, errorText, eventLabel, eventsManagerUrl, mappingPayload, mappingProblem, newRow, oauthNotice, sameMappings, sourceOptions, toRows,
   type MappingRow,
 } from '../lib/integrations';
-import type { Delivery, EventCatalog, Integration, IntegrationList, SendScope, TestEventResult } from '../lib/types';
+import type { Delivery, EventCatalog, Integration, IntegrationList, MetaDataset, SendScope, TestEventResult } from '../lib/types';
 import { useApi } from '../lib/useApi';
 import { StatusBadge } from './Integrations';
 
@@ -50,7 +51,62 @@ function ConnectionSection({ it, appId, onChange }: { it: Integration; appId: st
   const [datasetName, setDatasetName] = useState(it.dataset_name ?? '');
   const [token, setToken] = useState('');
   const [testCode, setTestCode] = useState(it.test_event_code ?? '');
+  const [manual, setManual] = useState(!it.oauth_connected);
+  const [datasets, setDatasets] = useState<MetaDataset[] | null>(null);
+  const [loadingDatasets, setLoadingDatasets] = useState(false);
+  const [datasetsError, setDatasetsError] = useState<string | null>(null);
   const a = useAction();
+  const startUrl = `/api/apps/${appId}/integrations/${it.id}/oauth/start`;
+
+  async function refreshDatasets() {
+    setLoadingDatasets(true);
+    setDatasetsError(null);
+    try {
+      setDatasets(await api<MetaDataset[]>(`/api/apps/${appId}/integrations/${it.id}/datasets`));
+    } catch (e) {
+      setDatasetsError(message(e));
+    } finally {
+      setLoadingDatasets(false);
+    }
+  }
+  useEffect(() => {
+    if (it.oauth_connected) void refreshDatasets();
+    // Load once per connection; the button refreshes on demand.
+  }, [it.oauth_connected]);
+
+  const picked = datasets?.find((d) => d.id === datasetId);
+  const datasetField = it.oauth_connected && !manual ? (
+    <Field label="Dataset" hint={picked?.owner ? `From ${picked.owner}.` : 'Datasets of the ad accounts and businesses your Facebook login can see.'}>
+      <div className="flex gap-2">
+        <select
+          className="input"
+          value={datasetId}
+          onChange={(e) => {
+            const d = datasets?.find((x) => x.id === e.target.value);
+            setDatasetId(e.target.value);
+            setDatasetName(d?.name ?? '');
+          }}
+        >
+          <option value="">{loadingDatasets ? 'Loading…' : 'Choose a dataset…'}</option>
+          {datasetId && !picked && <option value={datasetId}>{datasetName || datasetId}</option>}
+          {datasets?.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name} ({d.id})
+            </option>
+          ))}
+        </select>
+        <button type="button" className="btn shrink-0" onClick={() => void refreshDatasets()} disabled={loadingDatasets} aria-label="Refresh datasets">
+          <RefreshCw className={`size-4 ${loadingDatasets ? 'animate-spin' : ''}`} aria-hidden="true" />
+          <span className="hidden sm:inline">Refresh</span>
+        </button>
+      </div>
+      {datasetsError && <span role="alert" className="mt-1 block text-xs text-red-600">{datasetsError}</span>}
+    </Field>
+  ) : (
+    <Field label="Dataset ID" hint="Digits only, e.g. 1601828548167313.">
+      <input className="input" inputMode="numeric" value={datasetId} onChange={(e) => setDatasetId(e.target.value)} pattern="\d{5,25}" placeholder="1601828548167313" />
+    </Field>
+  );
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -75,14 +131,36 @@ function ConnectionSection({ it, appId, onChange }: { it: Integration; appId: st
         </>
       }
     >
+      {it.oauth_available && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-stone-50 px-4 py-3 text-sm">
+          {it.oauth_connected ? (
+            <>
+              <span className="text-stone-700">Connected to Facebook.</span>
+              <a className="underline" href={startUrl}>
+                Reconnect
+              </a>
+              <button type="button" className="underline" onClick={() => setManual((m) => !m)}>
+                {manual ? 'Choose from list' : 'Enter ID by hand'}
+              </button>
+            </>
+          ) : (
+            <>
+              <a className="btn-dark" href={startUrl}>
+                Connect with Facebook
+              </a>
+              <span className="text-stone-500">Lists your datasets so you can pick one. The access token below is still needed to send events.</span>
+            </>
+          )}
+        </div>
+      )}
       <form onSubmit={submit} onChange={a.clear} className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Dataset ID" hint="Digits only, e.g. 1601828548167313.">
-            <input className="input" inputMode="numeric" value={datasetId} onChange={(e) => setDatasetId(e.target.value)} pattern="\d{5,25}" placeholder="1601828548167313" />
-          </Field>
-          <Field label="Dataset name (optional)" hint="Only shown here, to tell datasets apart.">
-            <input className="input" value={datasetName} onChange={(e) => setDatasetName(e.target.value)} maxLength={100} placeholder="My app – iOS" />
-          </Field>
+          {datasetField}
+          {(manual || !it.oauth_connected) && (
+            <Field label="Dataset name (optional)" hint="Only shown here, to tell datasets apart.">
+              <input className="input" value={datasetName} onChange={(e) => setDatasetName(e.target.value)} maxLength={100} placeholder="My app – iOS" />
+            </Field>
+          )}
           <Field
             label="Conversions API access token"
             hint={it.has_token ? 'A token is saved. Paste a new one to replace it.' : 'Events Manager → your dataset → Settings → Generate access token.'}
@@ -457,6 +535,8 @@ export function IntegrationMeta() {
   const [it, setIt] = useState<Integration | null>(null);
   const [confirm, setConfirm] = useState(false);
   const disconnect = useAction();
+  const [params, setParams] = useSearchParams();
+  const notice = oauthNotice(params.get('oauth'));
 
   useEffect(() => {
     if (list.data) setIt(list.data.integrations.find((i) => i.provider === 'meta' && i.status !== 'disconnected') ?? null);
@@ -496,7 +576,15 @@ export function IntegrationMeta() {
         </button>
       </div>
 
-      <ConnectionSection key={`c-${it.id}`} it={it} appId={id} onChange={onChange} />
+      {notice && (
+        <div role={notice.ok ? 'status' : 'alert'} className={`flex items-start justify-between gap-3 rounded-lg border px-4 py-3 text-sm ${notice.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+          <span>{notice.text}</span>
+          <button type="button" className="text-xs underline" onClick={() => setParams({}, { replace: true })}>
+            Dismiss
+          </button>
+        </div>
+      )}
+      <ConnectionSection key={`c-${it.id}-${it.oauth_connected}`} it={it} appId={id} onChange={onChange} />
       <PostbacksSection key={`p-${it.id}`} it={it} appId={id} onChange={onChange} />
       <ActivationSection it={it} appId={id} onChange={onChange} />
       <DeliverySection it={it} appId={id} reloadKey={reloadKey} />

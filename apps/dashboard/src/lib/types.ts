@@ -193,6 +193,10 @@ export interface Integration {
   terms_accepted_at: number | null;
   has_token: boolean;
   keys_configured: boolean;
+  /** The server has a Meta app for "Connect with Facebook". */
+  oauth_available: boolean;
+  oauth_connected: boolean;
+  oauth_expires_at: number | null;
   /** First setting still needed before activation, or null. */
   missing: string | null;
   mappings: Mapping[];
@@ -232,4 +236,10 @@ export interface TestEventResult {
   outcome: 'sent' | 'retry' | 'fatal';
   error: string | null;
   target_event: string;
+}
+
+export interface MetaDataset {
+  id: string;
+  name: string;
+  owner: string | null;
 }
