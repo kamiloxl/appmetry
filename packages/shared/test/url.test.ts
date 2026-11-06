@@ -26,6 +26,20 @@ describe('url', () => {
     expect(extractTouch('https://a.io/page?x=1')).toBeNull();
     expect(extractTouch('myapp://home')).toBeNull();
   });
+  it('reads ad-network campaign parameters', () => {
+    expect(
+      touchFromQuery('utm_source=meta&campaign_id=120&adset_id=121&ad_id=122&placement=Facebook_Mobile_Feed&fbclid=IwAR1&campaign_ids=ARFx'),
+    ).toEqual({
+      utm_source: 'meta', campaign_id: '120', adset_id: '121', ad_id: '122', placement: 'Facebook_Mobile_Feed', fbclid: 'IwAR1', campaign_ids: 'ARFx',
+    });
+    expect(extractTouch('myapp://onboarding?campaign_ids=ARFx')).toEqual({ campaign_ids: 'ARFx' });
+  });
+  it('caps ad parameter lengths and ignores unfilled ad macros', () => {
+    const t = touchFromQuery(`ad_id=${'9'.repeat(300)}&campaign_ids=${'a'.repeat(2000)}&adset_id={{adset.id}}`);
+    expect(t.ad_id).toHaveLength(200);
+    expect(t.campaign_ids).toHaveLength(1000);
+    expect(t.adset_id).toBeUndefined();
+  });
   it('touchFromQuery parses a Play referrer', () => {
     expect(touchFromQuery('utm_source=google-play&utm_medium=organic')).toEqual({ utm_source: 'google-play', utm_medium: 'organic' });
   });

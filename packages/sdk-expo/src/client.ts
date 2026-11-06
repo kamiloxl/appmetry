@@ -7,7 +7,7 @@ import { buildContext, mobilePlatform } from './context';
 import { startDeepLinks, type LinkingLike } from './deeplink';
 import { Flusher } from './flusher';
 import { log, setDebug } from './log';
-import { collectInstallProps } from './native';
+import { collectAdSignals, collectInstallProps, type AdSignals } from './native';
 import { Queue } from './queue';
 import { applyAttribution, applyInstallId, type RevenueCatLike } from './revenuecat';
 import { SessionTracker } from './session';
@@ -23,6 +23,11 @@ export interface AppmetryOptions {
   /** Time in the background after which a new session starts. Default 5 min. */
   sessionTimeoutMs?: number;
   debug?: boolean;
+  /**
+   * Whether the user agreed to advertising measurement (sharing events with ad networks you connect in appmetry).
+   * Default false. A later `setAdConsent()` call is stored and wins over this option.
+   */
+  adConsent?: boolean;
 }
 
 export interface AppmetryApi {
@@ -31,6 +36,11 @@ export interface AppmetryApi {
   screen(name: string): void;
   identify(p: { userId?: string; email?: string; name?: string }): void;
   reportSource(answer: string): void;
+  /**
+   * Record the user's advertising-measurement choice, e.g. from your consent screen or after the ATT prompt.
+   * Stored on the device. With `true`, the IDFA (iOS, only when ATT is authorized) or GAID (Android) is read and sent.
+   */
+  setAdConsent(granted: boolean): void;
   optIn(): void;
   optOut(): void;
   installId(): Promise<string | null>;
@@ -50,6 +60,9 @@ export interface AppmetryInternal extends AppmetryApi {
 const KEY_IID = 'appmetry:iid';
 const KEY_CONSENT = 'appmetry:consent';
 const KEY_INSTALLED = 'appmetry:installed';
+const KEY_AD_CONSENT = 'appmetry:ad_consent';
+/** What the server last heard about ad consent (consent, ATT status, id present), so changes are sent once. */
+const KEY_AD_STATE = 'appmetry:ad_state';
 const DEFAULT_ATTRIBUTION_WAIT_MS = 3000;
 const DEFAULT_SESSION_TIMEOUT_MS = 5 * 60_000;
 const MAX_NAME = 255;
@@ -70,6 +83,7 @@ export interface AppmetryDeps {
   now?: () => number;
   os?: string;
   linking?: LinkingLike;
+  adSignals?: (adConsent: boolean) => Promise<AdSignals>;
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => {
@@ -87,6 +101,7 @@ const clean = (v: unknown, max: number): string | undefined => {
 export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
   const now = deps.now ?? Date.now;
   const newId = deps.newId ?? randomUUID;
+  const adSignals = deps.adSignals ?? ((c: boolean) => collectAdSignals(c));
 
   let initialized = false;
   let disabled = false;
@@ -155,6 +170,26 @@ export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
     flusher.notify();
   }
 
+  async function adConsentNow(): Promise<boolean> {
+    const stored = await store.get(KEY_AD_CONSENT);
+    if (stored === '1' || stored === '0') return stored === '1';
+    return opts.adConsent === true;
+  }
+
+  const adState = (s: AdSignals) => `${s.adConsent ? 1 : 0}|${s.att ?? ''}|${s.madid ? 1 : 0}`;
+
+  /** Send a consent event when consent, ATT status or id availability changed since the server last heard. */
+  async function syncAdConsent(ts: number) {
+    if (!enabled || !activated) return;
+    const gen = generation;
+    const signals = await adSignals(await adConsentNow());
+    if (gen !== generation) return;
+    const state = adState(signals);
+    if ((await store.get(KEY_AD_STATE)) === state || gen !== generation) return;
+    await emit('consent', ts, { props: { ...signals } });
+    if (gen === generation) await store.set(KEY_AD_STATE, state);
+  }
+
   function onAppState(state: string) {
     const ts = now();
     void run(async () => {
@@ -162,6 +197,7 @@ export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
       if (state === 'active') {
         const r = tracker.onActive(ts);
         if (r.started) await emit('session_start', ts, { sid: r.sid });
+        await syncAdConsent(ts); // the user may have changed ATT in Settings
       } else if (state === 'background') {
         const r = tracker.onBackground(ts);
         if (r) {
@@ -198,6 +234,14 @@ export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
         log('collectInstallProps failed', err);
       }
       if (!alive()) return;
+      let signals: AdSignals | null = null;
+      try {
+        signals = await adSignals(await adConsentNow());
+        props = { ...props, ...signals };
+      } catch (err) {
+        log('ad signals failed', err);
+      }
+      if (!alive()) return;
       const e: SdkEvent = { id: newId(), type: 'install', ts, sid: tracker.current() ?? newId() };
       if (Object.keys(props).length > 0) e.props = props;
       // install belongs to the session that is about to start, so open it first.
@@ -211,9 +255,14 @@ export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
       }
       if (!alive()) return;
       await store.set(KEY_INSTALLED, '1');
-    } else if (appState().currentState === 'active') {
-      const r = tracker.onActive(ts);
-      if (r.started) await emit('session_start', ts, { sid: r.sid });
+      if (signals && alive()) await store.set(KEY_AD_STATE, adState(signals));
+    } else {
+      if (appState().currentState === 'active') {
+        const r = tracker.onActive(ts);
+        if (r.started) await emit('session_start', ts, { sid: r.sid });
+      }
+      if (!alive()) return;
+      await syncAdConsent(ts);
     }
     if (!alive()) return;
     subscription?.remove();
@@ -344,6 +393,16 @@ export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
       });
     },
 
+    setAdConsent(granted) {
+      const ts = now();
+      void run(async (gen) => {
+        if (typeof granted !== 'boolean') return;
+        await store.set(KEY_AD_CONSENT, granted ? '1' : '0');
+        if (gen !== generation) return;
+        await syncAdConsent(ts);
+      });
+    },
+
     optIn() {
       void run(async (gen) => {
         await cleanup; // a pending opt-out cleanup must finish before consent is granted again
@@ -379,6 +438,7 @@ export function createAppmetry(deps: AppmetryDeps = {}): AppmetryInternal {
           store.set(KEY_CONSENT, 'denied'),
           store.remove(KEY_IID),
           store.remove(KEY_INSTALLED),
+          store.remove(KEY_AD_STATE),
           store.remove(ATTRIBUTION_KEY),
           queue.clear(),
         ]).catch((err: unknown) => log('optOut cleanup failed', err));

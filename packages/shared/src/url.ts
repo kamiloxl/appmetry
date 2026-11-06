@@ -6,6 +6,15 @@ export interface Touch {
   utm_content?: string;
   ref?: string;
   click_id?: string;
+  /** Ad-network campaign parameters (network-neutral names; Meta, TikTok and Snap all offer URL macros for them). */
+  campaign_id?: string;
+  adset_id?: string;
+  ad_id?: string;
+  placement?: string;
+  /** Meta click id, appended by Meta to outbound links. */
+  fbclid?: string;
+  /** Meta Aggregated Event Measurement: opaque, encrypted campaign metadata on the ad's deep link. */
+  campaign_ids?: string;
 }
 
 // Ported from datalog public/js/script.js: personal data in URLs never leaves the device.
@@ -44,6 +53,15 @@ export function stripPrivateParams(url: string): string {
 
 const UTM = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'] as const;
 
+const AD_PARAMS = ['campaign_id', 'adset_id', 'ad_id', 'placement', 'fbclid', 'campaign_ids'] as const;
+export type AdParam = (typeof AD_PARAMS)[number];
+/** Longest stored value per ad parameter. campaign_ids is an encrypted blob, so it gets more room. */
+export const AD_PARAM_MAX: Record<AdParam, number> = {
+  campaign_id: 200, adset_id: 200, ad_id: 200, placement: 200, fbclid: 500, campaign_ids: 1000,
+};
+/** A macro the ad network left unfilled, e.g. `{{ad.id}}` in a test click. */
+const UNFILLED_MACRO = /^\{\{.*\}\}$/;
+
 export function touchFromQuery(query: string): Touch {
   const touch: Touch = {};
   let via: string | undefined;
@@ -57,6 +75,9 @@ export function touchFromQuery(query: string): Touch {
     else if (k === 'ref') touch.ref = v;
     else if (k === 'via') via = v;
     else if (k === 'click_id') touch.click_id = v;
+    else if ((AD_PARAMS as readonly string[]).includes(k) && !UNFILLED_MACRO.test(v)) {
+      touch[k as AdParam] = v.slice(0, AD_PARAM_MAX[k as AdParam]);
+    }
   }
   if (touch.ref === undefined && via !== undefined) touch.ref = via;
   return touch;

@@ -19,4 +19,7 @@ android {
 
 dependencies {
   implementation "com.android.installreferrer:installreferrer:2.2"
+  // GAID for ad-network postbacks. Its manifest adds the com.google.android.gms.permission.AD_ID permission;
+  // apps that never send ad consent can remove it with tools:node="remove" (see README).
+  implementation "com.google.android.gms:play-services-ads-identifier:18.2.0"
 }

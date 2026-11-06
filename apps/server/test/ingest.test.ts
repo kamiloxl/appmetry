@@ -5,6 +5,7 @@ import type { SdkEvent } from '@appmetry/shared';
 import worker from '../src/index';
 import type { AppRow, Env } from '../src/env';
 import { ingestBatch } from '../src/ingest';
+import { open, parseKeys } from '../src/lib/sealed';
 import { BASE, createApp, login } from './helpers';
 
 const DAY = 86_400_000;
@@ -45,6 +46,7 @@ interface PostInit {
   cf?: Record<string, unknown>;
   method?: string;
   headers?: Record<string, string>;
+  envPatch?: Partial<Env>;
 }
 
 /** Send a request to the batch endpoint in-process, optionally with a stub rate limiter and request.cf. */
@@ -52,7 +54,8 @@ async function post(init: PostInit = {}): Promise<Response> {
   const headers = new Headers({ 'content-type': 'application/json', 'cf-connecting-ip': '198.51.100.7', ...init.headers });
   if (init.key) headers.set('X-App-Key', init.key);
   const body = init.body ?? (init.json !== undefined ? JSON.stringify(init.json) : undefined);
-  const testEnv: Env = init.limiter ? { ...(env as Env), INGEST_LIMITER: init.limiter } : (env as Env);
+  let testEnv: Env = init.limiter ? { ...(env as Env), INGEST_LIMITER: init.limiter } : (env as Env);
+  if (init.envPatch) testEnv = { ...testEnv, ...init.envPatch };
   const req = new Request(BASE + '/api/v1/batch', {
     method: init.method ?? 'POST',
     headers,
@@ -65,8 +68,8 @@ async function post(init: PostInit = {}): Promise<Response> {
   return res;
 }
 
-const send = (app: AppRow, events: SdkEvent[], ctxPatch: Record<string, unknown> = {}, cf?: Record<string, unknown>) =>
-  post({ key: app.app_key, json: { context: context(ctxPatch), events }, cf });
+const send = (app: AppRow, events: SdkEvent[], ctxPatch: Record<string, unknown> = {}, cf?: Record<string, unknown>, envPatch?: Partial<Env>) =>
+  post({ key: app.app_key, json: { context: context(ctxPatch), events }, cf, envPatch });
 
 const install = (app: AppRow, id = 'install-0001') =>
   env.DB.prepare('SELECT * FROM installs WHERE app_id = ? AND id = ?').bind(app.id, id).first<Record<string, unknown>>();
@@ -419,5 +422,98 @@ describe('POST /api/v1/batch', () => {
     expect(await session(app)).toMatchObject({ entry_screen: 'A', exit_screen: 'C', screens: 3, started_at: a.ts });
     await send(app, [ev('screen', { name: 'D', at: -1000 })]);
     expect(await session(app)).toMatchObject({ entry_screen: 'A', exit_screen: 'D', screens: 4 });
+  });
+});
+
+describe('ad consent and device extinfo', () => {
+  const IDFA = '6D92078A-8246-4BA4-AE5B-76104861E7DC';
+  const keys = () => parseKeys(env as Env);
+
+  it('stores consent, ATT status and the sealed IDFA when ATT is authorized; never in events', async () => {
+    const app = await createApp(cookie);
+    await send(app, [ev('install', { props: { adConsent: true, att: 'authorized', madid: IDFA } })]);
+    const row = await install(app);
+    expect(row).toMatchObject({ ad_consent: 1, att_status: 'authorized' });
+    expect(row!.madid_enc).toMatch(/^v1\./);
+    expect(await open(keys(), row!.madid_enc as string, `install:${app.id}:install-0001:madid`)).toBe(IDFA);
+    const rows = (await env.DB.prepare('SELECT * FROM events WHERE app_id = ?').bind(app.id).all<{ props: string }>()).results;
+    expect(JSON.stringify(rows)).not.toContain(IDFA);
+    expect(JSON.parse(rows[0].props)).toEqual({ adConsent: true, att: 'authorized' });
+  });
+
+  it('does not store the IDFA without ATT authorization or without ad consent', async () => {
+    const app = await createApp(cookie);
+    await send(app, [ev('install', { props: { adConsent: true, att: 'denied', madid: IDFA } })]);
+    expect(await install(app)).toMatchObject({ ad_consent: 1, att_status: 'denied', madid_enc: null });
+
+    const app2 = await createApp(cookie);
+    await send(app2, [ev('install', { props: { adConsent: false, att: 'authorized', madid: IDFA } })]);
+    expect(await install(app2)).toMatchObject({ ad_consent: 0, madid_enc: null });
+  });
+
+  it('stores the GAID on Android with consent, and ignores the all-zero id', async () => {
+    const app = await createApp(cookie);
+    const gaid = '38400000-8cf0-11bd-b23e-10b96e40000d';
+    await send(app, [ev('install', { props: { adConsent: true, madid: gaid } })], { platform: 'android' });
+    expect((await install(app))!.madid_enc).toMatch(/^v1\./);
+
+    const app2 = await createApp(cookie);
+    await send(app2, [ev('install', { props: { adConsent: true, madid: '00000000-0000-0000-0000-000000000000' } })], { platform: 'android' });
+    expect((await install(app2))!.madid_enc).toBeNull();
+  });
+
+  it('a later consent event updates the install; withdrawing consent clears the IDFA', async () => {
+    const app = await createApp(cookie);
+    await send(app, [ev('install', { props: { adConsent: false, att: 'notDetermined' } })]);
+    await send(app, [ev('consent', { props: { adConsent: true, att: 'authorized', madid: IDFA } })]);
+    expect(await install(app)).toMatchObject({ ad_consent: 1, att_status: 'authorized' });
+    expect((await install(app))!.madid_enc).not.toBeNull();
+
+    await send(app, [ev('consent', { props: { adConsent: false, att: 'authorized', madid: IDFA } })]);
+    expect(await install(app)).toMatchObject({ ad_consent: 0, madid_enc: null });
+  });
+
+  it('the latest consent event in a batch wins, by ts', async () => {
+    const app = await createApp(cookie);
+    await send(app, [
+      ev('consent', { props: { adConsent: false }, at: -1000 }),
+      ev('install', { props: { adConsent: true, att: 'authorized' }, at: -5000 }),
+    ]);
+    expect(await install(app)).toMatchObject({ ad_consent: 0 });
+  });
+
+  it('an older event from a late batch never overrides newer stored consent', async () => {
+    const app = await createApp(cookie);
+    await send(app, [ev('consent', { props: { adConsent: true, att: 'authorized' } })]);
+    await send(app, [ev('install', { props: { adConsent: false, att: 'denied' }, at: -60_000 })]);
+    expect(await install(app)).toMatchObject({ ad_consent: 1, att_status: 'authorized' });
+  });
+
+  it('without INTEGRATIONS_KEY the IDFA is dropped, consent is still stored (fail closed)', async () => {
+    const app = await createApp(cookie);
+    await send(app, [ev('install', { props: { adConsent: true, att: 'authorized', madid: IDFA } })], {}, undefined, { INTEGRATIONS_KEY: undefined });
+    expect(await install(app)).toMatchObject({ ad_consent: 1, att_status: 'authorized', madid_enc: null });
+  });
+
+  it('ignores invalid consent values', async () => {
+    const app = await createApp(cookie);
+    await send(app, [ev('install', { props: { adConsent: 'yes', att: 'maybe', madid: 'not-an-id' } })]);
+    expect(await install(app)).toMatchObject({ ad_consent: null, att_status: null, madid_enc: null });
+  });
+
+  it('stores device extinfo from the context when present', async () => {
+    const app = await createApp(cookie);
+    await send(app, [ev('install')], { deviceModelId: 'iPhone16,1', screenWidth: 1179, screenHeight: 2556, screenDensity: 3 });
+    expect(JSON.parse((await install(app))!.device_extinfo as string)).toEqual({ modelId: 'iPhone16,1', w: 1179, h: 2556, density: 3 });
+
+    const app2 = await createApp(cookie);
+    await send(app2, [ev('install')]);
+    expect((await install(app2))!.device_extinfo).toBeNull();
+  });
+
+  it('consent events do not count as custom events in session aggregates', async () => {
+    const app = await createApp(cookie);
+    await send(app, [ev('session_start'), ev('consent', { props: { adConsent: true } })]);
+    expect((await session(app))!.events).toBe(0);
   });
 });

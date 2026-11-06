@@ -21,7 +21,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   // runDaily walks every app and has a query budget, so each test starts from an empty instance.
   await db.batch(
-    [...['installs', 'sessions', 'events', 'links', 'link_clicks', 'payments', 'rc_events', 'apps'].map((t) => db.prepare(`DELETE FROM ${t}`)), db.prepare("DELETE FROM meta WHERE key LIKE 'cron_last_run:%'")],
+    [...['installs', 'sessions', 'events', 'links', 'link_clicks', 'payments', 'rc_events', 'postback_outbox', 'apps'].map((t) => db.prepare(`DELETE FROM ${t}`)), db.prepare("DELETE FROM meta WHERE key LIKE 'cron_last_run:%'")],
   );
 });
 
@@ -66,6 +66,27 @@ describe('erasure', () => {
     expect(p1).toMatchObject({ install_id: null, app_user_id: null, session_id: null, matched_by: 'erased', amount: 999, kind: 'payment' });
     expect(await db.prepare('SELECT install_id FROM payments WHERE id = ?').bind(`${app.id}_p2`).first('install_id')).toBe('install-other-1');
     expect(await row1('SELECT install_id, app_user_id FROM rc_events WHERE id = ?', `${app.id}_rc1`)).toEqual({ install_id: null, app_user_id: null });
+  });
+
+  it('erase deletes queued ad-network postbacks and the sealed advertising id of erased installs only', async () => {
+    const app = await createApp(cookie);
+    const now = Date.now();
+    await addInstall(app.id, 'install-ad-1', now, 'user-ad');
+    await addInstall(app.id, 'install-ad-2', now, 'user-keep');
+    await db.prepare('UPDATE installs SET madid_enc = ? WHERE app_id = ?').bind('v1.x.y.z', app.id).run();
+    const outbox = (id: string, installId: string) =>
+      db
+        .prepare(`INSERT INTO postback_outbox (id, app_id, integration_id, source_event_id, install_id, target_event, event_ts, created_at)
+                  VALUES (?, ?, 'int-1', ?, ?, 'Purchase', ?, ?)`)
+        .bind(id, app.id, `src-${id}`, installId, now, now)
+        .run();
+    await outbox('pb-1', 'install-ad-1');
+    await outbox('pb-2', 'install-ad-2');
+
+    expect(await eraseUser(db, app.id, { userId: 'user-ad' })).toBe(1);
+    expect(await n('SELECT COUNT(*) AS n FROM postback_outbox WHERE app_id = ? AND install_id = ?', app.id, 'install-ad-1')).toBe(0);
+    expect(await n('SELECT COUNT(*) AS n FROM postback_outbox WHERE app_id = ? AND install_id = ?', app.id, 'install-ad-2')).toBe(1);
+    expect(await n('SELECT COUNT(*) AS n FROM installs WHERE app_id = ? AND madid_enc IS NOT NULL', app.id)).toBe(1);
   });
 
   it('erase by user_id also nulls app_user_id on unmatched payments and rc_events', async () => {

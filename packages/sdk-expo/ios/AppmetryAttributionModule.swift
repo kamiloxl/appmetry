@@ -2,8 +2,13 @@ import ExpoModulesCore
 #if canImport(AdServices)
 import AdServices
 #endif
+import AdSupport
+import AppTrackingTransparency
 
-// Install attribution inputs: Apple AdServices token (no ATT consent required).
+private let zeroId = "00000000-0000-0000-0000-000000000000"
+
+// Install attribution inputs: Apple AdServices token (no ATT consent required), plus the ATT status and, only when
+// ATT is authorized, the IDFA. The module never shows the ATT prompt: the app does that.
 public class AppmetryAttributionModule: Module {
   public func definition() -> ModuleDefinition {
     Name("AppmetryAttribution")
@@ -20,6 +25,24 @@ public class AppmetryAttributionModule: Module {
       }
       #endif
       return nil
+    }
+
+    // "authorized" | "denied" | "restricted" | "notDetermined", or nil for a status this SDK does not know.
+    AsyncFunction("getTrackingAuthorizationStatus") { () -> String? in
+      switch ATTrackingManager.trackingAuthorizationStatus {
+      case .authorized: return "authorized"
+      case .denied: return "denied"
+      case .restricted: return "restricted"
+      case .notDetermined: return "notDetermined"
+      @unknown default: return nil
+      }
+    }
+
+    // The IDFA only when ATT is authorized; nil otherwise or when iOS returns the all-zero id.
+    AsyncFunction("getAdvertisingId") { () -> String? in
+      guard ATTrackingManager.trackingAuthorizationStatus == .authorized else { return nil }
+      let id = ASIdentifierManager.shared().advertisingIdentifier.uuidString
+      return id == zeroId ? nil : id
     }
   }
 }

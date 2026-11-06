@@ -83,6 +83,20 @@ describe('install referrer', () => {
     expect(click).toBe(iid);
   });
 
+  it('click-level campaign parameters reach the install', async () => {
+    const app = await createApp(cookie);
+    await addLink(app.id, 'link-0010', { utm_source: 'meta', utm_medium: 'paid_social', utm_campaign: 'link-level', utm_content: null });
+    await addClick(app.id, 'link-0010', 'click-0010');
+    await env.DB.prepare('UPDATE link_clicks SET utm_campaign = ?, campaign_id = ?, adset_id = ?, ad_id = ?, fbclid = ? WHERE id = ?')
+      .bind('click-level', '120', '121', '122', 'IwAR', 'click-0010')
+      .run();
+    const iid = newIid();
+    await ingest(app, 'android', iid, [installEv({ referrer: 'click_id=click-0010&campaign_id=999' })]);
+    expect(await row(app, iid)).toMatchObject({
+      attribution_method: 'install_referrer', channel: 'Paid', utm_campaign: 'click-level', campaign_id: '120', adset_id: '121', ad_id: '122', fbclid: 'IwAR',
+    });
+  });
+
   it('ignores click_id of another app', async () => {
     const app = await createApp(cookie);
     const other = await createApp(cookie);
@@ -275,6 +289,7 @@ describe('Apple Search Ads', () => {
     await applyAttribution(env.DB, app.id, iid, {
       method: 'search_ads', source: 'Apple Search Ads', channel: 'Paid Search', utm_source: null, utm_medium: null, utm_campaign: null,
       utm_term: null, utm_content: null, ref: null, click_id: null, asa_campaign_id: 5, asa_adgroup_id: null, asa_keyword_id: null,
+      campaign_id: null, adset_id: null, ad_id: null, fbclid: null, campaign_ids: null,
     });
     expect(await row(app, iid)).toMatchObject({ attribution_method: 'install_referrer', utm_source: 'google', asa_campaign_id: null });
   });

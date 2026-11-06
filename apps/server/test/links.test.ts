@@ -22,10 +22,10 @@ const STORE = 'https://apps.apple.com/app/id1';
 const WEB = 'https://example.com';
 
 /** Open a tracked link as a public visitor (no cookie), with a request.cf country. */
-async function click(slug: string, ua: string, cf: Record<string, unknown> = { country: 'PL' }) {
+async function click(slug: string, ua: string, cf: Record<string, unknown> = { country: 'PL' }, query = '') {
   const ctx = createExecutionContext();
   const res = await worker.fetch(
-    new Request(BASE + `/l/${slug}`, { headers: { 'user-agent': ua, 'cf-connecting-ip': '198.51.100.9', referer: 'https://t.co/x' }, redirect: 'manual', cf: cf as RequestInit['cf'] }),
+    new Request(BASE + `/l/${slug}${query}`, { headers: { 'user-agent': ua, 'cf-connecting-ip': '198.51.100.9', referer: 'https://t.co/x' }, redirect: 'manual', cf: cf as RequestInit['cf'] }),
     env as Env,
     ctx,
   );
@@ -83,7 +83,35 @@ describe('GET /l/:slug', () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ app_id: app.id, platform: 'android', country: 'DE', install_id: null });
     expect(rows[1]).toMatchObject({ platform: 'other', country: null });
-    expect(Object.keys(rows[0]).sort()).toEqual(['app_id', 'country', 'id', 'install_id', 'link_id', 'platform', 'ts']);
+    expect(Object.keys(rows[0]).sort()).toEqual([
+      'ad_id', 'adset_id', 'app_id', 'campaign_id', 'campaign_ids', 'country', 'fbclid', 'id', 'install_id', 'link_id', 'placement',
+      'platform', 'ts', 'utm_campaign', 'utm_content', 'utm_medium', 'utm_source', 'utm_term',
+    ]);
+    expect(rows[0]).toMatchObject({ campaign_id: null, utm_source: null });
+  });
+
+  it('stores click-level campaign parameters from the query and drops private and unfilled ones', async () => {
+    const app = await createApp(cookie, { app_store_url: STORE });
+    await createLink(app.id, { name: 'Meta', slug: 'meta', utm_source: 'meta', utm_medium: 'paid_social' });
+    const q =
+      '?utm_campaign=Spring%20Sale&utm_content=Video%201&campaign_id=120&adset_id=121&ad_id=122&placement=Instagram_Stories' +
+      '&fbclid=IwAR1&adset_name={{adset.name}}&email=a@b.c&utm_term=' + 'x'.repeat(300);
+    expect((await click('meta', IOS, { country: 'GB' }, q)).status).toBe(302);
+    const row = await env.DB.prepare('SELECT * FROM link_clicks').first<Record<string, unknown>>();
+    expect(row).toMatchObject({
+      utm_source: null, utm_medium: null, utm_campaign: 'Spring Sale', utm_content: 'Video 1', campaign_id: '120', adset_id: '121', ad_id: '122',
+      placement: 'Instagram_Stories', fbclid: 'IwAR1', campaign_ids: null,
+    });
+    expect((row!.utm_term as string).length).toBe(200);
+    expect(JSON.stringify(row)).not.toContain('a@b.c');
+  });
+
+  it('android referrer carries click-level values over the link values', async () => {
+    const app = await createApp(cookie, { play_store_url: PLAY });
+    await createLink(app.id, { name: 'Meta', slug: 'meta-a', utm_source: 'meta', utm_campaign: 'link-level' });
+    const res = await click('meta-a', ANDROID, {}, '?utm_campaign=click-level&campaign_id=120&ad_id=122');
+    const referrer = new URLSearchParams(decodeURIComponent((res.headers.get('location') as string).split('referrer=')[1]));
+    expect(Object.fromEntries(referrer)).toMatchObject({ utm_source: 'meta', utm_campaign: 'click-level', campaign_id: '120', ad_id: '122' });
   });
 
   it('unknown slug returns 404', async () => {

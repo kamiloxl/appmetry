@@ -42,28 +42,30 @@ export async function applyAttribution(
 
 // ---------- Install Referrer
 
-const orUndefined = (v: string | null) => (v ? v : undefined);
+const orUndefined = (v: string | null | undefined) => (v ? v : undefined);
 
-/** The link behind a click id, only when both rows belong to this app. Empty strings count as absent. */
+/** Click-level columns on `link_clicks` (from the tracked link's query string); they override the link's values. */
+const CLICK_TOUCH = [
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'campaign_id', 'adset_id', 'ad_id', 'placement', 'fbclid', 'campaign_ids',
+] as const;
+const LINK_TOUCH = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'ref'] as const;
+
+/** The click merged over its link, only when both rows belong to this app. Empty strings count as absent. */
 async function linkForClick(db: D1Database, appId: string, clickId: string): Promise<LinkTouch | null> {
   const click = await db
-    .prepare('SELECT link_id FROM link_clicks WHERE id = ? AND app_id = ?')
+    .prepare(`SELECT link_id, ${CLICK_TOUCH.join(', ')} FROM link_clicks WHERE id = ? AND app_id = ?`)
     .bind(clickId, appId)
-    .first<{ link_id: string }>();
+    .first<Record<(typeof CLICK_TOUCH)[number], string | null> & { link_id: string }>();
   if (!click) return null;
   const link = await db
-    .prepare('SELECT utm_source, utm_medium, utm_campaign, utm_content, ref FROM links WHERE id = ? AND app_id = ?')
+    .prepare(`SELECT ${LINK_TOUCH.join(', ')} FROM links WHERE id = ? AND app_id = ?`)
     .bind(click.link_id, appId)
-    .first<Record<'utm_source' | 'utm_medium' | 'utm_campaign' | 'utm_content' | 'ref', string | null>>();
+    .first<Record<(typeof LINK_TOUCH)[number], string | null>>();
   if (!link) return null;
-  return {
-    click_id: clickId,
-    utm_source: orUndefined(link.utm_source),
-    utm_medium: orUndefined(link.utm_medium),
-    utm_campaign: orUndefined(link.utm_campaign),
-    utm_content: orUndefined(link.utm_content),
-    ref: orUndefined(link.ref),
-  };
+  const touch: LinkTouch = { click_id: clickId };
+  for (const k of LINK_TOUCH) touch[k] = orUndefined(link[k]);
+  for (const k of CLICK_TOUCH) touch[k] = orUndefined(click[k]) ?? touch[k];
+  return touch;
 }
 
 async function applyReferrer(db: D1Database, appId: string, installId: string, referrer: string): Promise<void> {

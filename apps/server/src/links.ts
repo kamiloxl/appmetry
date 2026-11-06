@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { stripPrivateParams, touchFromQuery, type Touch } from '@appmetry/shared';
 import { type AppEnv, type AppRow, getAppById } from './env';
 import { randomId } from './lib/crypto';
 import { platformFromUA } from './lib/ua';
@@ -81,14 +82,37 @@ function pickTarget(app: AppRow, platform: 'ios' | 'android' | 'other'): string 
   return app.web_url ?? app.app_store_url ?? app.play_store_url;
 }
 
-/** The Play Install Referrer value: URL-encoded once as a whole, appended to the store URL. */
-function withReferrer(playUrl: string, clickId: string, link: Link): string {
+/** Values a click's query string may set: UTM overrides and ad-network campaign parameters (spec §3). */
+const CLICK_PARAMS = [
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'campaign_id', 'adset_id', 'ad_id', 'placement', 'fbclid', 'campaign_ids',
+] as const;
+type ClickParams = Partial<Record<(typeof CLICK_PARAMS)[number], string>>;
+
+/** Click-level values from the request URL. Private params are dropped; UTM values are capped like link fields. */
+function clickParams(url: string): ClickParams {
+  const q = stripPrivateParams(url).split('?')[1] ?? '';
+  const t: Touch = touchFromQuery(q);
+  const out: ClickParams = {};
+  for (const k of CLICK_PARAMS) {
+    const v = t[k];
+    if (v) out[k] = k.startsWith('utm_') ? v.slice(0, OPTIONAL_MAX) : v;
+  }
+  return out;
+}
+
+/** The Play Install Referrer value: URL-encoded once as a whole, appended to the store URL. Click values beat link values. */
+function withReferrer(playUrl: string, clickId: string, link: Link, click: ClickParams): string {
   const params = new URLSearchParams({ click_id: clickId });
-  if (link.utm_source) params.set('utm_source', link.utm_source);
-  if (link.utm_medium) params.set('utm_medium', link.utm_medium);
-  if (link.utm_campaign) params.set('utm_campaign', link.utm_campaign);
-  if (link.utm_content) params.set('utm_content', link.utm_content);
-  if (link.ref) params.set('ref', link.ref);
+  const set = (k: string, v: string | null | undefined) => {
+    if (v) params.set(k, v);
+  };
+  set('utm_source', click.utm_source ?? link.utm_source);
+  set('utm_medium', click.utm_medium ?? link.utm_medium);
+  set('utm_campaign', click.utm_campaign ?? link.utm_campaign);
+  set('utm_term', click.utm_term);
+  set('utm_content', click.utm_content ?? link.utm_content);
+  set('ref', link.ref);
+  for (const k of ['campaign_id', 'adset_id', 'ad_id', 'placement', 'fbclid', 'campaign_ids'] as const) set(k, click[k]);
   return `${playUrl}${playUrl.includes('?') ? '&' : '?'}referrer=${encodeURIComponent(params.toString())}`;
 }
 
@@ -105,13 +129,17 @@ linksRoutes.get('/l/:slug', async (c) => {
   if (!target) return plain('Link not available');
 
   const clickId = `c_${randomId(10)}`;
-  if (platform === 'android' && target === app.play_store_url) target = withReferrer(target, clickId, link);
+  const params = clickParams(c.req.url);
+  if (platform === 'android' && target === app.play_store_url) target = withReferrer(target, clickId, link, params);
 
-  // Only platform and country are kept: no IP, user agent or referrer.
+  // Kept: platform, country and the campaign parameters from the link's query string. No IP, user agent or referrer.
   const country = (c.req.raw.cf?.country as string | undefined) ?? null;
   c.executionCtx.waitUntil(
-    c.env.DB.prepare('INSERT INTO link_clicks (id, link_id, app_id, ts, platform, country) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind(clickId, link.id, app.id, Date.now(), platform, country)
+    c.env.DB.prepare(
+      `INSERT INTO link_clicks (id, link_id, app_id, ts, platform, country, ${CLICK_PARAMS.join(', ')})
+       VALUES (${Array(6 + CLICK_PARAMS.length).fill('?').join(', ')})`,
+    )
+      .bind(clickId, link.id, app.id, Date.now(), platform, country, ...CLICK_PARAMS.map((k) => params[k] ?? null))
       .run()
       .catch((err) => console.error('link click insert failed', err)),
   );

@@ -1,6 +1,7 @@
 import type { Batch, SdkEvent } from '@appmetry/shared';
 
 import { createAppmetry } from '../client';
+import type { AdSignals } from '../native';
 import type { KV } from '../storage';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
@@ -56,7 +57,9 @@ afterEach(async () => {
   }
 });
 
-function setup(opts: { os?: string; state?: string; kv?: MemoryKV; status?: number; hang?: boolean } = {}) {
+function setup(
+  opts: { os?: string; state?: string; kv?: MemoryKV; status?: number; hang?: boolean; adSignals?: (c: boolean) => Promise<AdSignals> } = {},
+) {
   const kv = opts.kv ?? new MemoryKV();
   const appState = fakeAppState(opts.state ?? 'active');
   const bodies: Batch[] = [];
@@ -78,6 +81,7 @@ function setup(opts: { os?: string; state?: string; kv?: MemoryKV; status?: numb
     newId: () => `id-${String(++n).padStart(6, '0')}-xxxx`,
     now: () => clock,
     os: opts.os ?? 'ios',
+    adSignals: opts.adSignals ?? (async (adConsent) => ({ adConsent })),
   });
   created.push(api);
   const sent = () => bodies.flatMap((b) => b.events);
@@ -373,3 +377,92 @@ describe('opt-out semantics', () => {
 function kv(a: { kv: MemoryKV }) {
   return a.kv;
 }
+
+describe('ad consent', () => {
+  const IDFA = '6D92078A-8246-4BA4-AE5B-76104861E7DC';
+  /** A device whose ATT status can change; the IDFA is returned only with consent and authorization. */
+  function device(att: AdSignals['att'] = 'notDetermined') {
+    const d = {
+      att,
+      signals: jest.fn(async (adConsent: boolean): Promise<AdSignals> => {
+        const s: AdSignals = { adConsent, att: d.att };
+        if (adConsent && d.att === 'authorized') s.madid = IDFA;
+        return s;
+      }),
+    };
+    return d;
+  }
+  const consentEvents = (evs: SdkEvent[]) => evs.filter((e) => e.type === 'consent');
+
+  it('the install event carries ad consent, false by default, and no id', async () => {
+    const a = setup({ adSignals: device('denied').signals });
+    a.api.init(init);
+    await settle();
+    await a.api.flush();
+    expect(a.sent().find((e) => e.type === 'install')?.props).toEqual({ adConsent: false, att: 'denied' });
+  });
+
+  it('the adConsent option sends the IDFA with the install when ATT is authorized', async () => {
+    const a = setup({ adSignals: device('authorized').signals });
+    a.api.init({ ...init, adConsent: true });
+    await settle();
+    await a.api.flush();
+    expect(a.sent().find((e) => e.type === 'install')?.props).toEqual({ adConsent: true, att: 'authorized', madid: IDFA });
+    expect(consentEvents(a.sent())).toHaveLength(0);
+  });
+
+  it('setAdConsent sends one consent event per change and is remembered', async () => {
+    const d = device('authorized');
+    const store = new MemoryKV();
+    const a = setup({ kv: store, adSignals: d.signals });
+    a.api.init(init);
+    await settle();
+    a.api.setAdConsent(true);
+    a.api.setAdConsent(true);
+    await settle();
+    await a.api.flush();
+    expect(consentEvents(a.sent()).map((e) => e.props)).toEqual([{ adConsent: true, att: 'authorized', madid: IDFA }]);
+    expect(store.map.get('appmetry:ad_consent')).toBe('1');
+
+    // A new launch with the option off still uses the stored choice, and sends nothing new.
+    const b = setup({ kv: store, adSignals: d.signals });
+    b.api.init({ ...init, adConsent: false });
+    await settle();
+    await b.api.flush();
+    expect(consentEvents(b.sent())).toHaveLength(0);
+    expect(d.signals).toHaveBeenLastCalledWith(true);
+  });
+
+  it('an ATT change seen on foreground sends a consent event', async () => {
+    const d = device('notDetermined');
+    const a = setup({ adSignals: d.signals });
+    a.api.init({ ...init, adConsent: true });
+    await settle();
+    d.att = 'authorized';
+    a.appState.emit('background');
+    a.appState.emit('active');
+    await settle();
+    await a.api.flush();
+    expect(consentEvents(a.sent()).map((e) => e.props)).toEqual([{ adConsent: true, att: 'authorized', madid: IDFA }]);
+  });
+
+  it('withdrawing consent sends adConsent false without an id', async () => {
+    const a = setup({ adSignals: device('authorized').signals });
+    a.api.init({ ...init, adConsent: true });
+    await settle();
+    a.api.setAdConsent(false);
+    await settle();
+    await a.api.flush();
+    expect(consentEvents(a.sent()).map((e) => e.props)).toEqual([{ adConsent: false, att: 'authorized' }]);
+  });
+
+  it('sends nothing while analytics consent is withheld', async () => {
+    const a = setup({ adSignals: device('authorized').signals });
+    a.api.init({ ...init, requireConsent: true });
+    await settle();
+    a.api.setAdConsent(true);
+    await settle();
+    await a.api.flush();
+    expect(a.fetchFn).not.toHaveBeenCalled();
+  });
+});

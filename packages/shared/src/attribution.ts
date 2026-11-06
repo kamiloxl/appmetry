@@ -18,6 +18,12 @@ export interface InstallAttribution {
   asa_campaign_id: number | null;
   asa_adgroup_id: number | null;
   asa_keyword_id: number | null;
+  /** Ad-network ids from the click or deep link (Touch); they travel with the method that carried them. */
+  campaign_id: string | null;
+  adset_id: string | null;
+  ad_id: string | null;
+  fbclid: string | null;
+  campaign_ids: string | null;
 }
 
 export interface AdServicesResult {
@@ -27,6 +33,7 @@ export interface AdServicesResult {
   keywordId?: number;
 }
 
+/** The stored click (its own query values first) merged over its link. */
 export interface LinkTouch extends Touch {
   click_id: string;
 }
@@ -45,6 +52,7 @@ function base(method: AttributionMethod, source: string, channel: Channel): Inst
     utm_source: null, utm_medium: null, utm_campaign: null, utm_term: null, utm_content: null,
     ref: null, click_id: null,
     asa_campaign_id: null, asa_adgroup_id: null, asa_keyword_id: null,
+    campaign_id: null, adset_id: null, ad_id: null, fbclid: null, campaign_ids: null,
   };
 }
 
@@ -59,6 +67,11 @@ function fromTouchWith(method: AttributionMethod, t: Touch): InstallAttribution 
     utm_content: t.utm_content ?? null,
     ref: t.ref ?? null,
     click_id: t.click_id ?? null,
+    campaign_id: t.campaign_id ?? null,
+    adset_id: t.adset_id ?? null,
+    ad_id: t.ad_id ?? null,
+    fbclid: t.fbclid ?? null,
+    campaign_ids: t.campaign_ids ?? null,
   };
 }
 
@@ -77,6 +90,12 @@ export function fromInstallReferrer(raw: string, link: LinkTouch | null): Instal
         utm_content: link.utm_content ?? parsed.utm_content,
         ref: link.ref ?? parsed.ref,
         click_id: link.click_id,
+        campaign_id: link.campaign_id ?? parsed.campaign_id,
+        adset_id: link.adset_id ?? parsed.adset_id,
+        ad_id: link.ad_id ?? parsed.ad_id,
+        placement: link.placement ?? parsed.placement,
+        fbclid: link.fbclid ?? parsed.fbclid,
+        campaign_ids: link.campaign_ids ?? parsed.campaign_ids,
       }
     : parsed;
   if (t.utm_source?.toLowerCase() === 'google-play' && t.utm_medium?.toLowerCase() === 'organic') return null;

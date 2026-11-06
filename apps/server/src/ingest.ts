@@ -9,6 +9,8 @@ import {
   organic,
   stripPrivateParams,
   validateBatch,
+  ATT_STATUSES,
+  type AttStatus,
   type AttributionMethod,
   type Batch,
   type InstallAttribution,
@@ -16,6 +18,7 @@ import {
 } from '@appmetry/shared';
 import { sanitizeInstallProps, makeOnInstall } from './attribution';
 import { getAppByKey, type AppEnv, type AppRow } from './env';
+import { parseKeys, seal, type SealKeys } from './lib/sealed';
 
 /** City-level location from `request.cf`. Nothing else about the request is stored (spec §7). */
 export interface Geo {
@@ -127,7 +130,7 @@ export async function handleBatch(c: Context<AppEnv>): Promise<Response> {
 
   const now = Date.now();
   const onInstall = makeOnInstall(c.env.DB, app, c.executionCtx.waitUntil.bind(c.executionCtx), now);
-  const result = await ingestBatch(c.env.DB, app, v.batch, geoFrom(c.req.raw), now, onInstall);
+  const result = await ingestBatch(c.env.DB, app, v.batch, geoFrom(c.req.raw), now, onInstall, { keys: parseKeys(c.env) });
   return c.json({ inserted: result.inserted, dropped: result.dropped + v.dropped }, 202);
 }
 
@@ -148,7 +151,12 @@ function storedEvent(e: SdkEvent): { name: string | null; props: string | null }
   const name = e.name === undefined ? null : e.type === 'deep_link' ? stripPrivateParams(e.name) : e.name;
   if (e.type === 'install' && e.props) {
     // The AdServices token is a credential: it never reaches `events.props`. The referrer loses private params.
-    const props = sanitizeInstallProps(e.props);
+    const { madid: _madid, ...props } = sanitizeInstallProps(e.props);
+    return { name, props: Object.keys(props).length ? JSON.stringify(props) : null };
+  }
+  if (e.type === 'consent' && e.props) {
+    // The advertising id lives on the install only, sealed (see consentStatement).
+    const { madid: _madid, ...props } = e.props;
     return { name, props: Object.keys(props).length ? JSON.stringify(props) : null };
   }
   return { name, props: e.props ? JSON.stringify(e.props) : null };
@@ -157,6 +165,7 @@ function storedEvent(e: SdkEvent): { name: string | null; props: string | null }
 export const ATTRIBUTION_COLUMNS = [
   'source', 'channel', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref', 'click_id',
   'asa_campaign_id', 'asa_adgroup_id', 'asa_keyword_id',
+  'campaign_id', 'adset_id', 'ad_id', 'fbclid', 'campaign_ids',
 ] as const;
 
 function attributionValues(a: InstallAttribution): Array<string | number | null> {
@@ -182,7 +191,72 @@ export function rowToAttribution(row: InstallAttrRow): InstallAttribution {
     asa_campaign_id: num(row.asa_campaign_id),
     asa_adgroup_id: num(row.asa_adgroup_id),
     asa_keyword_id: num(row.asa_keyword_id),
+    campaign_id: row.campaign_id,
+    adset_id: row.adset_id,
+    ad_id: row.ad_id,
+    fbclid: row.fbclid,
+    campaign_ids: row.campaign_ids,
   };
+}
+
+// ---------- ad consent
+
+/** IDFA / GAID shape. The all-zero id means "not available" (limited ad tracking). */
+const MADID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ZERO_MADID = '00000000-0000-0000-0000-000000000000';
+
+interface Consent {
+  ts: number;
+  adConsent: boolean;
+  att: AttStatus | null;
+  madid: string | null;
+}
+
+/** Ad consent reported by an install or consent event, or null when the event carries no valid `adConsent`. */
+function consentFrom(e: SdkEvent): Consent | null {
+  if (e.type !== 'install' && e.type !== 'consent') return null;
+  const p = e.props ?? {};
+  if (typeof p.adConsent !== 'boolean') return null;
+  const att = typeof p.att === 'string' && (ATT_STATUSES as readonly string[]).includes(p.att) ? (p.att as AttStatus) : null;
+  const madid = typeof p.madid === 'string' && MADID_RE.test(p.madid) && p.madid !== ZERO_MADID ? p.madid : null;
+  return { ts: e.ts, adConsent: p.adConsent, att, madid };
+}
+
+/** The sealing context for an install's advertising id: the value only opens for this app and install. */
+export const madidContext = (appId: string, iid: string) => `install:${appId}:${iid}:madid`;
+
+/**
+ * Write the latest ad consent in the batch. The advertising id is kept only with consent (on iOS only when ATT is
+ * authorized) and only sealed; withdrawing consent clears it. Without INTEGRATIONS_KEY it is dropped (fail closed).
+ * An event older than the stored one never wins, so out-of-order batches converge.
+ */
+async function consentStatement(
+  db: D1Database, app: AppRow, iid: string, platform: string, events: SdkEvent[], keys: SealKeys | null,
+): Promise<D1PreparedStatement | null> {
+  let latest: Consent | null = null;
+  for (const e of events) {
+    const c = consentFrom(e);
+    if (c && (!latest || c.ts >= latest.ts)) latest = c;
+  }
+  if (!latest) return null;
+  const keep = latest.adConsent && latest.madid !== null && (platform !== 'ios' || latest.att === 'authorized');
+  const madidEnc = keep && keys ? await seal(keys, latest.madid!, madidContext(app.id, iid)) : null;
+  return db
+    .prepare(
+      `UPDATE installs SET ad_consent = ?, ad_consent_ts = ?, att_status = COALESCE(?, att_status), madid_enc = ?
+       WHERE app_id = ? AND id = ? AND (ad_consent_ts IS NULL OR ad_consent_ts <= ?)`,
+    )
+    .bind(latest.adConsent ? 1 : 0, latest.ts, latest.att, madidEnc, app.id, iid, latest.ts);
+}
+
+/** Device facts for ad-network postbacks (Meta extinfo), or null when the SDK sent none. */
+function deviceExtinfo(ctx: Batch['context']): string | null {
+  const info: Record<string, string | number> = {};
+  if (ctx.deviceModelId) info.modelId = ctx.deviceModelId;
+  if (ctx.screenWidth) info.w = ctx.screenWidth;
+  if (ctx.screenHeight) info.h = ctx.screenHeight;
+  if (ctx.screenDensity) info.density = ctx.screenDensity;
+  return Object.keys(info).length ? JSON.stringify(info) : null;
 }
 
 /**
@@ -230,6 +304,7 @@ export async function ingestBatch(
   geo: Geo,
   now: number,
   onInstall: OnInstall = noopOnInstall,
+  opts: { keys?: SealKeys | null } = {},
 ): Promise<{ inserted: number; dropped: number }> {
   const ctx = batch.context;
   const iid = ctx.iid;
@@ -273,20 +348,21 @@ export async function ingestBatch(
     db
       .prepare(
         `INSERT INTO installs (app_id, id, platform, first_seen, last_seen, app_version, os_version, device_model, locale,
-           country, region, city, attribution_method, ${ATTRIBUTION_COLUMNS.join(', ')})
-         VALUES (${Array(25).fill('?').join(', ')})
+           country, region, city, device_extinfo, attribution_method, ${ATTRIBUTION_COLUMNS.join(', ')})
+         VALUES (${Array(14 + ATTRIBUTION_COLUMNS.length).fill('?').join(', ')})
          ON CONFLICT (app_id, id) DO UPDATE SET
            first_seen = MIN(first_seen, excluded.first_seen),
            last_seen = MAX(last_seen, excluded.last_seen),
            app_version = excluded.app_version,
            os_version = excluded.os_version,
            device_model = excluded.device_model,
-           locale = excluded.locale`,
+           locale = excluded.locale,
+           device_extinfo = COALESCE(excluded.device_extinfo, device_extinfo)`,
       )
       .bind(
         app.id, iid, ctx.platform, firstTs, lastTs,
         orNull(ctx.appVersion), orNull(ctx.osVersion), orNull(ctx.deviceModel), orNull(ctx.locale),
-        geo.country, geo.region, geo.city,
+        geo.country, geo.region, geo.city, deviceExtinfo(ctx),
         ...attributionValues(org),
       ),
   );
@@ -362,6 +438,10 @@ export async function ingestBatch(
         .bind(userId, email, name, app.id, iid),
     );
   }
+
+  // Ad consent (install / consent events), after the install row exists.
+  const consent = await consentStatement(db, app, iid, ctx.platform, fresh, opts.keys ?? null);
+  if (consent) stmts.push(consent);
 
   // 6. One transaction for the whole batch.
   const results = await db.batch(stmts);
