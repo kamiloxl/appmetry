@@ -109,6 +109,9 @@ export interface TrackedLink {
   utm_campaign: string | null;
   utm_content: string | null;
   ref: string | null;
+  /** In-app URL the ad opens (deep link / personalised first screen). */
+  deep_link_url: string | null;
+  integration_id: string | null;
   created_at: number;
 }
 
@@ -159,4 +162,87 @@ export interface StepStatus {
 export interface SetupStatus {
   steps: Record<SetupStep, StepStatus>;
   current: SetupStep | null;
+}
+
+// ---------- ad-network integrations (server: apps/server/src/integrations/routes.ts)
+
+export type IntegrationStatus = 'draft' | 'active' | 'error' | 'disconnected';
+export type SendScope = 'all' | 'attributed';
+
+export interface Mapping {
+  source_event: string;
+  target_event: string;
+  send_value: boolean;
+  locked: boolean;
+}
+
+export interface DeliveryStats {
+  sent_24h: number;
+  failed_24h: number;
+  pending: number;
+  last_sent_at: number | null;
+  last_error: string | null;
+}
+
+export interface Integration {
+  id: string;
+  provider: string;
+  status: IntegrationStatus;
+  send_scope: SendScope;
+  dataset_id: string | null;
+  dataset_name: string | null;
+  test_event_code: string | null;
+  share_hashed_email: boolean;
+  terms_accepted_at: number | null;
+  has_token: boolean;
+  keys_configured: boolean;
+  /** The server has a Meta app for "Connect with Facebook". */
+  oauth_available: boolean;
+  oauth_connected: boolean;
+  oauth_expires_at: number | null;
+  /** First setting still needed before activation, or null. */
+  missing: string | null;
+  mappings: Mapping[];
+  target_events: string[];
+  stats: DeliveryStats;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface IntegrationList {
+  providers: Array<{ provider: string; name: string }>;
+  keys_configured: boolean;
+  integrations: Integration[];
+}
+
+export interface EventCatalog {
+  builtin: string[];
+  custom: Array<{ name: string; count_30d: number }>;
+}
+
+export interface Delivery {
+  id: string;
+  source_event_id: string;
+  target_event: string;
+  event_ts: number;
+  value_cents: number | null;
+  currency: string | null;
+  status: 'pending' | 'sent' | 'failed' | 'skipped';
+  attempts: number;
+  last_error: string | null;
+  created_at: number;
+  sent_at: number | null;
+}
+
+export interface TestEventResult {
+  ok: boolean;
+  outcome: 'sent' | 'retry' | 'fatal';
+  error: string | null;
+  target_event: string;
+}
+
+export interface MetaDataset {
+  id: string;
+  name: string;
+  owner: string | null;
 }

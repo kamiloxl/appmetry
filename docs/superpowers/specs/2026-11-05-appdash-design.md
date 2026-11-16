@@ -360,6 +360,9 @@ The person deploying an instance is the controller for their app's users; appdas
   consent is needed under PECR for on-device storage/access.
 - **Minimisation**: no IP, IDFA/GAID or coordinates; city-level geo; private URL params stripped in the SDK;
   `props` ≤ 1 KB; `email`/`name` optional (`userId` alone is enough for matching).
+  Exception since 2026-11-06: with an active ad-network integration and the user's ad consent, the advertising id is
+  stored encrypted, and IP / user agent are kept encrypted only until the event is sent to the network
+  (`2026-11-06-ad-network-postbacks-design.md` §7).
 - **Retention**: per-app `retention_months` (default 25) enforced by the cron.
 - **Erasure**: delete-by-`user_id`/install-id removes the install, sessions, events, link-click links and
   nulls identity fields on payments (payment amounts stay for accounting).

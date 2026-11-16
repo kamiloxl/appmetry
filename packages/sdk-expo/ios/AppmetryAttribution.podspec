@@ -19,7 +19,7 @@ Pod::Spec.new do |s|
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
-  s.weak_frameworks = 'AdServices'
+  s.weak_frameworks = 'AdServices', 'AppTrackingTransparency', 'AdSupport'
 
   # Swift/Objective-C compatibility
   s.pod_target_xcconfig = {

@@ -9,6 +9,8 @@ import {
   organic,
   stripPrivateParams,
   validateBatch,
+  ATT_STATUSES,
+  type AttStatus,
   type AttributionMethod,
   type Batch,
   type InstallAttribution,
@@ -16,6 +18,9 @@ import {
 } from '@appmetry/shared';
 import { sanitizeInstallProps, makeOnInstall } from './attribution';
 import { getAppByKey, type AppEnv, type AppRow } from './env';
+import { parseKeys, seal, type SealKeys } from './lib/sealed';
+import { madidContext } from './integrations/enqueue';
+import { queueAndSend, sdkSourceEvents, transientFrom } from './integrations/hooks';
 
 /** City-level location from `request.cf`. Nothing else about the request is stored (spec §7). */
 export interface Geo {
@@ -127,7 +132,9 @@ export async function handleBatch(c: Context<AppEnv>): Promise<Response> {
 
   const now = Date.now();
   const onInstall = makeOnInstall(c.env.DB, app, c.executionCtx.waitUntil.bind(c.executionCtx), now);
-  const result = await ingestBatch(c.env.DB, app, v.batch, geoFrom(c.req.raw), now, onInstall);
+  const result = await ingestBatch(c.env.DB, app, v.batch, geoFrom(c.req.raw), now, onInstall, { keys: parseKeys(c.env) });
+  const postbacks = sdkSourceEvents(v.batch.context.iid, result.events, transientFrom(c.req.raw));
+  if (postbacks.length) c.executionCtx.waitUntil(queueAndSend(c.env, app, postbacks, now));
   return c.json({ inserted: result.inserted, dropped: result.dropped + v.dropped }, 202);
 }
 
@@ -148,7 +155,12 @@ function storedEvent(e: SdkEvent): { name: string | null; props: string | null }
   const name = e.name === undefined ? null : e.type === 'deep_link' ? stripPrivateParams(e.name) : e.name;
   if (e.type === 'install' && e.props) {
     // The AdServices token is a credential: it never reaches `events.props`. The referrer loses private params.
-    const props = sanitizeInstallProps(e.props);
+    const { madid: _madid, ...props } = sanitizeInstallProps(e.props);
+    return { name, props: Object.keys(props).length ? JSON.stringify(props) : null };
+  }
+  if (e.type === 'consent' && e.props) {
+    // The advertising id lives on the install only, sealed (see consentStatement).
+    const { madid: _madid, ...props } = e.props;
     return { name, props: Object.keys(props).length ? JSON.stringify(props) : null };
   }
   return { name, props: e.props ? JSON.stringify(e.props) : null };
@@ -157,6 +169,7 @@ function storedEvent(e: SdkEvent): { name: string | null; props: string | null }
 export const ATTRIBUTION_COLUMNS = [
   'source', 'channel', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref', 'click_id',
   'asa_campaign_id', 'asa_adgroup_id', 'asa_keyword_id',
+  'campaign_id', 'adset_id', 'ad_id', 'fbclid', 'campaign_ids', 'link_id',
 ] as const;
 
 function attributionValues(a: InstallAttribution): Array<string | number | null> {
@@ -182,7 +195,71 @@ export function rowToAttribution(row: InstallAttrRow): InstallAttribution {
     asa_campaign_id: num(row.asa_campaign_id),
     asa_adgroup_id: num(row.asa_adgroup_id),
     asa_keyword_id: num(row.asa_keyword_id),
+    campaign_id: row.campaign_id,
+    adset_id: row.adset_id,
+    ad_id: row.ad_id,
+    fbclid: row.fbclid,
+    campaign_ids: row.campaign_ids,
+    link_id: row.link_id,
   };
+}
+
+// ---------- ad consent
+
+/** IDFA / GAID shape. The all-zero id means "not available" (limited ad tracking). */
+const MADID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ZERO_MADID = '00000000-0000-0000-0000-000000000000';
+
+interface Consent {
+  ts: number;
+  adConsent: boolean;
+  att: AttStatus | null;
+  madid: string | null;
+}
+
+/** Ad consent reported by an install or consent event, or null when the event carries no valid `adConsent`. */
+function consentFrom(e: SdkEvent): Consent | null {
+  if (e.type !== 'install' && e.type !== 'consent') return null;
+  const p = e.props ?? {};
+  if (typeof p.adConsent !== 'boolean') return null;
+  const att = typeof p.att === 'string' && (ATT_STATUSES as readonly string[]).includes(p.att) ? (p.att as AttStatus) : null;
+  const madid = typeof p.madid === 'string' && MADID_RE.test(p.madid) && p.madid !== ZERO_MADID ? p.madid : null;
+  return { ts: e.ts, adConsent: p.adConsent, att, madid };
+}
+
+
+/**
+ * Write the latest ad consent in the batch. The advertising id is kept only with consent (on iOS only when ATT is
+ * authorized) and only sealed; withdrawing consent clears it. Without INTEGRATIONS_KEY it is dropped (fail closed).
+ * An event older than the stored one never wins, so out-of-order batches converge.
+ */
+async function consentStatement(
+  db: D1Database, app: AppRow, iid: string, platform: string, events: SdkEvent[], keys: SealKeys | null,
+): Promise<D1PreparedStatement | null> {
+  let latest: Consent | null = null;
+  for (const e of events) {
+    const c = consentFrom(e);
+    if (c && (!latest || c.ts >= latest.ts)) latest = c;
+  }
+  if (!latest) return null;
+  const keep = latest.adConsent && latest.madid !== null && (platform !== 'ios' || latest.att === 'authorized');
+  const madidEnc = keep && keys ? await seal(keys, latest.madid!, madidContext(app.id, iid)) : null;
+  return db
+    .prepare(
+      `UPDATE installs SET ad_consent = ?, ad_consent_ts = ?, att_status = COALESCE(?, att_status), madid_enc = ?
+       WHERE app_id = ? AND id = ? AND (ad_consent_ts IS NULL OR ad_consent_ts <= ?)`,
+    )
+    .bind(latest.adConsent ? 1 : 0, latest.ts, latest.att, madidEnc, app.id, iid, latest.ts);
+}
+
+/** Device facts for ad-network postbacks (Meta extinfo), or null when the SDK sent none. */
+function deviceExtinfo(ctx: Batch['context']): string | null {
+  const info: Record<string, string | number> = {};
+  if (ctx.deviceModelId) info.modelId = ctx.deviceModelId;
+  if (ctx.screenWidth) info.w = ctx.screenWidth;
+  if (ctx.screenHeight) info.h = ctx.screenHeight;
+  if (ctx.screenDensity) info.density = ctx.screenDensity;
+  return Object.keys(info).length ? JSON.stringify(info) : null;
 }
 
 /**
@@ -208,13 +285,52 @@ WHERE app_id = ?1 AND id = ?2`;
 
 type LinkTouch = { e: SdkEvent; touch: NonNullable<ReturnType<typeof extractTouch>> };
 
-/** Deep links in `events` (ts order) that carry a touch, read from the cleaned URL. */
-function deepLinkTouches(events: SdkEvent[]): LinkTouch[] {
+type AdLinkRow = { id: string; slug: string; utm_source: string | null; utm_medium: string | null; utm_campaign: string | null; utm_content: string | null; ref: string | null };
+/** Ad links named by deep links in a batch (`amt_l`), by slug. Only this app's links. */
+type AdLinks = Map<string, AdLinkRow>;
+
+async function adLinksFor(db: D1Database, appId: string, events: SdkEvent[]): Promise<AdLinks> {
+  const slugs = new Set<string>();
+  for (const e of events) {
+    if (e.type !== 'deep_link' || !e.name) continue;
+    const slug = extractTouch(stripPrivateParams(e.name))?.link_slug;
+    if (slug) slugs.add(slug);
+  }
+  if (!slugs.size) return new Map();
+  const { results } = await db
+    .prepare(
+      `SELECT id, slug, utm_source, utm_medium, utm_campaign, utm_content, ref FROM links
+       WHERE app_id = ? AND slug IN (SELECT value FROM json_each(?))`,
+    )
+    .bind(appId, JSON.stringify([...slugs]))
+    .all<AdLinkRow>();
+  return new Map(results.map((r) => [r.slug, r]));
+}
+
+/**
+ * Deep links in `events` (ts order) that carry a touch, read from the cleaned URL. A deep link naming one of the app's
+ * ad links (`amt_l`) takes the link's values where the URL has none, and the link id; an unknown slug is dropped.
+ */
+function deepLinkTouches(events: SdkEvent[], adLinks: AdLinks = new Map()): LinkTouch[] {
   const out: LinkTouch[] = [];
   for (const e of events) {
     if (e.type !== 'deep_link' || !e.name) continue;
     const touch = extractTouch(stripPrivateParams(e.name));
-    if (touch) out.push({ e, touch });
+    if (!touch) continue;
+    const { link_slug, ...rest } = touch;
+    const link = link_slug ? adLinks.get(link_slug) : undefined;
+    const merged = link
+      ? {
+          ...rest,
+          utm_source: rest.utm_source ?? link.utm_source ?? undefined,
+          utm_medium: rest.utm_medium ?? link.utm_medium ?? undefined,
+          utm_campaign: rest.utm_campaign ?? link.utm_campaign ?? undefined,
+          utm_content: rest.utm_content ?? link.utm_content ?? undefined,
+          ref: rest.ref ?? link.ref ?? undefined,
+          link_id: link.id,
+        }
+      : rest;
+    if (Object.values(merged).some((v) => v !== undefined)) out.push({ e, touch: merged });
   }
   return out;
 }
@@ -230,7 +346,8 @@ export async function ingestBatch(
   geo: Geo,
   now: number,
   onInstall: OnInstall = noopOnInstall,
-): Promise<{ inserted: number; dropped: number }> {
+  opts: { keys?: SealKeys | null } = {},
+): Promise<{ inserted: number; dropped: number; events: SdkEvent[] }> {
   const ctx = batch.context;
   const iid = ctx.iid;
 
@@ -247,7 +364,7 @@ export async function ingestBatch(
     inBatch.add(e.id);
     events.push(e);
   }
-  if (!events.length) return { inserted: 0, dropped };
+  if (!events.length) return { inserted: 0, dropped, events: [] };
 
   // 2. Skip events we already have: this is what makes a retried batch safe.
   const existing = await db
@@ -256,11 +373,12 @@ export async function ingestBatch(
     .all<{ id: string }>();
   const known = new Set(existing.results.map((r) => r.id));
   const fresh = events.filter((e) => !known.has(e.id));
+  const adLinks = await adLinksFor(db, app.id, events);
   if (!fresh.length) {
     // Everything is stored already, but a previous attempt may have died before the attribution follow-up.
     await runOnInstall(onInstall, iid, events);
-    await upgradeAttribution(db, app.id, iid, events);
-    return { inserted: 0, dropped };
+    await upgradeAttribution(db, app.id, iid, events, adLinks);
+    return { inserted: 0, dropped, events: [] };
   }
 
   const firstTs = fresh[0].ts;
@@ -273,20 +391,21 @@ export async function ingestBatch(
     db
       .prepare(
         `INSERT INTO installs (app_id, id, platform, first_seen, last_seen, app_version, os_version, device_model, locale,
-           country, region, city, attribution_method, ${ATTRIBUTION_COLUMNS.join(', ')})
-         VALUES (${Array(25).fill('?').join(', ')})
+           country, region, city, device_extinfo, attribution_method, ${ATTRIBUTION_COLUMNS.join(', ')})
+         VALUES (${Array(14 + ATTRIBUTION_COLUMNS.length).fill('?').join(', ')})
          ON CONFLICT (app_id, id) DO UPDATE SET
            first_seen = MIN(first_seen, excluded.first_seen),
            last_seen = MAX(last_seen, excluded.last_seen),
            app_version = excluded.app_version,
            os_version = excluded.os_version,
            device_model = excluded.device_model,
-           locale = excluded.locale`,
+           locale = excluded.locale,
+           device_extinfo = COALESCE(excluded.device_extinfo, device_extinfo)`,
       )
       .bind(
         app.id, iid, ctx.platform, firstTs, lastTs,
         orNull(ctx.appVersion), orNull(ctx.osVersion), orNull(ctx.deviceModel), orNull(ctx.locale),
-        geo.country, geo.region, geo.city,
+        geo.country, geo.region, geo.city, deviceExtinfo(ctx),
         ...attributionValues(org),
       ),
   );
@@ -327,7 +446,7 @@ export async function ingestBatch(
 
   // 4b. Session source from its first deep link with a touch (only while still Direct), then aggregates.
   for (const [sid, list] of bySession) {
-    const first = deepLinkTouches(list)[0];
+    const first = deepLinkTouches(list, adLinks)[0];
     if (first) {
       const { source, channel } = classify({ utmSource: first.touch.utm_source, utmMedium: first.touch.utm_medium, ref: first.touch.ref });
       if (channel !== 'Direct') {
@@ -363,6 +482,10 @@ export async function ingestBatch(
     );
   }
 
+  // Ad consent (install / consent events), after the install row exists.
+  const consent = await consentStatement(db, app, iid, ctx.platform, fresh, opts.keys ?? null);
+  if (consent) stmts.push(consent);
+
   // 6. One transaction for the whole batch.
   const results = await db.batch(stmts);
   const inserted = fresh.filter((e) => (results[eventStmtAt.get(e.id)!].meta.changes ?? 0) > 0);
@@ -372,9 +495,9 @@ export async function ingestBatch(
 
   // 7b. Attribution upgrades from every valid event in the batch, not only new ones: if a previous attempt
   // committed and then died, its retry still applies the upgrade. mergeAttribution makes this idempotent.
-  await upgradeAttribution(db, app.id, iid, events);
+  await upgradeAttribution(db, app.id, iid, events, adLinks);
 
-  return { inserted: inserted.length, dropped };
+  return { inserted: inserted.length, dropped, events: inserted };
 }
 
 async function runOnInstall(onInstall: OnInstall, iid: string, events: SdkEvent[]): Promise<void> {
@@ -390,9 +513,9 @@ async function runOnInstall(onInstall: OnInstall, iid: string, events: SdkEvent[
 }
 
 /** Apply a reported source, or a deep link in the install's earliest session, when it beats the current method. */
-async function upgradeAttribution(db: D1Database, appId: string, iid: string, events: SdkEvent[]): Promise<void> {
+async function upgradeAttribution(db: D1Database, appId: string, iid: string, events: SdkEvent[], adLinks: AdLinks): Promise<void> {
   const sources = events.filter((e) => e.type === 'source' && e.name && e.name.trim());
-  const links = deepLinkTouches(events);
+  const links = deepLinkTouches(events, adLinks);
   if (!sources.length && !links.length) return;
 
   const candidates: Array<{ ts: number; a: InstallAttribution }> = sources.map((e) => ({ ts: e.ts, a: fromReported(e.name!) }));

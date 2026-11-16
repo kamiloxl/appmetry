@@ -36,4 +36,13 @@ describe('privacyParagraph', () => {
     }
     expect(privacyParagraph('Demo', 1)).toContain('1 month.');
   });
+
+  it('with an active ad network, discloses the advertising id, sharing and transfer instead of denying them', async () => {
+    const { privacyParagraph } = await import('../src/lib/setup');
+    const p = privacyParagraph('Demo', 25, ['Meta']);
+    expect(p).not.toContain('does not use your advertising identifier');
+    for (const t of ['agree to advertising measurement', 'IDFA', 'only if you allow tracking', 'GAID', 'Meta', 'installs and purchases', 'IP address', 'outside the UK/EEA', 'withdraw']) {
+      expect(p).toContain(t);
+    }
+  });
 });

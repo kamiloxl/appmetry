@@ -42,28 +42,30 @@ export async function applyAttribution(
 
 // ---------- Install Referrer
 
-const orUndefined = (v: string | null) => (v ? v : undefined);
+const orUndefined = (v: string | null | undefined) => (v ? v : undefined);
 
-/** The link behind a click id, only when both rows belong to this app. Empty strings count as absent. */
+/** Click-level columns on `link_clicks` (from the tracked link's query string); they override the link's values. */
+const CLICK_TOUCH = [
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'campaign_id', 'adset_id', 'ad_id', 'placement', 'fbclid', 'campaign_ids',
+] as const;
+const LINK_TOUCH = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'ref'] as const;
+
+/** The click merged over its link, only when both rows belong to this app. Empty strings count as absent. */
 async function linkForClick(db: D1Database, appId: string, clickId: string): Promise<LinkTouch | null> {
   const click = await db
-    .prepare('SELECT link_id FROM link_clicks WHERE id = ? AND app_id = ?')
+    .prepare(`SELECT link_id, ${CLICK_TOUCH.join(', ')} FROM link_clicks WHERE id = ? AND app_id = ?`)
     .bind(clickId, appId)
-    .first<{ link_id: string }>();
+    .first<Record<(typeof CLICK_TOUCH)[number], string | null> & { link_id: string }>();
   if (!click) return null;
   const link = await db
-    .prepare('SELECT utm_source, utm_medium, utm_campaign, utm_content, ref FROM links WHERE id = ? AND app_id = ?')
+    .prepare(`SELECT ${LINK_TOUCH.join(', ')} FROM links WHERE id = ? AND app_id = ?`)
     .bind(click.link_id, appId)
-    .first<Record<'utm_source' | 'utm_medium' | 'utm_campaign' | 'utm_content' | 'ref', string | null>>();
+    .first<Record<(typeof LINK_TOUCH)[number], string | null>>();
   if (!link) return null;
-  return {
-    click_id: clickId,
-    utm_source: orUndefined(link.utm_source),
-    utm_medium: orUndefined(link.utm_medium),
-    utm_campaign: orUndefined(link.utm_campaign),
-    utm_content: orUndefined(link.utm_content),
-    ref: orUndefined(link.ref),
-  };
+  const touch: LinkTouch = { click_id: clickId, link_id: click.link_id };
+  for (const k of LINK_TOUCH) touch[k] = orUndefined(link[k]);
+  for (const k of CLICK_TOUCH) touch[k] = orUndefined(click[k]) ?? touch[k];
+  return touch;
 }
 
 async function applyReferrer(db: D1Database, appId: string, installId: string, referrer: string): Promise<void> {
@@ -167,9 +169,14 @@ export async function handleAttribution(c: Context<AppEnv>): Promise<Response> {
   if (!ID_RE.test(iid)) return c.json({ error: 'invalid_iid' }, 400);
 
   const row = await c.env.DB
-    .prepare(`SELECT attribution_method, asa_pending_token, ${ATTRIBUTION_COLUMNS.join(', ')} FROM installs WHERE app_id = ? AND id = ?`)
+    .prepare(
+      `SELECT i.attribution_method, i.asa_pending_token, ${ATTRIBUTION_COLUMNS.map((k) => `i.${k}`).join(', ')},
+              l.slug AS link_slug, l.deep_link_url
+       FROM installs i LEFT JOIN links l ON l.id = i.link_id AND l.app_id = i.app_id
+       WHERE i.app_id = ? AND i.id = ?`,
+    )
     .bind(app.id, iid)
-    .first<InstallAttrRow & { asa_pending_token: string | null }>();
+    .first<InstallAttrRow & { asa_pending_token: string | null; link_slug: string | null; deep_link_url: string | null }>();
   if (!row) return c.json({ error: 'not_found' }, 404);
 
   const a = rowToAttribution(row);
@@ -184,6 +191,10 @@ export async function handleAttribution(c: Context<AppEnv>): Promise<Response> {
     asa_campaign_id: a.asa_campaign_id,
     asa_adgroup_id: a.asa_adgroup_id,
     asa_keyword_id: a.asa_keyword_id,
+    campaign_id: a.campaign_id,
+    adset_id: a.adset_id,
+    ad_id: a.ad_id,
+    deep_link: row.deep_link_url && row.link_slug ? { url: row.deep_link_url, link: row.link_slug } : null,
   };
   return c.json(body);
 }

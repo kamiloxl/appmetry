@@ -4,12 +4,14 @@ import android.os.Handler
 import android.os.Looper
 import com.android.installreferrer.api.InstallReferrerClient
 import com.android.installreferrer.api.InstallReferrerStateListener
+import com.google.android.gms.ads.identifier.AdvertisingIdClient
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.util.concurrent.atomic.AtomicBoolean
 
 private const val TIMEOUT_MS = 10_000L
+private const val ZERO_ID = "00000000-0000-0000-0000-000000000000"
 
 // Install attribution inputs: Play Install Referrer.
 class AppmetryAttributionModule : Module() {
@@ -19,6 +21,19 @@ class AppmetryAttributionModule : Module() {
     // Resolves { referrer, clickTs, installTs } (seconds) or null. Never rejects.
     AsyncFunction("getInstallReferrer") { promise: Promise ->
       fetchInstallReferrer(promise)
+    }
+
+    // The GAID, or null when the user limited ad tracking, Play services are missing, or the id is all zeros.
+    // Blocking call: AsyncFunction bodies run off the main thread. The SDK calls this only with ad consent.
+    AsyncFunction("getAdvertisingId") {
+      val context = appContext.reactContext?.applicationContext ?: return@AsyncFunction null
+      try {
+        val info = AdvertisingIdClient.getAdvertisingIdInfo(context)
+        val id = info.id
+        if (info.isLimitAdTrackingEnabled || id == null || id == ZERO_ID) null else id
+      } catch (e: Exception) {
+        null
+      }
     }
   }
 

@@ -1,4 +1,4 @@
-import { Check, ChevronsUpDown, LayoutDashboard, LayoutGrid, Link2, ListChecks, LogOut, Menu, Minus, Plus, Settings2, Users, type LucideIcon } from 'lucide-react';
+import { Check, ChevronsUpDown, LayoutDashboard, LayoutGrid, Link2, ListChecks, LogOut, Menu, Minus, Plug, Plus, Settings2, Users, type LucideIcon } from 'lucide-react';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, useLocation, useMatch, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -29,9 +29,12 @@ const SECTIONS: { to: string; label: string; icon: LucideIcon; end?: boolean }[]
 ];
 const CONFIGURE: { to: string; label: string; icon: LucideIcon }[] = [
   { to: 'setup', label: 'Setup', icon: ListChecks },
+  { to: 'integrations', label: 'Integrations', icon: Plug },
   { to: 'settings', label: 'Settings', icon: Settings2 },
 ];
-const TITLES: Record<string, string> = { '': 'Overview', customers: 'Customers', links: 'Links', settings: 'Settings', setup: 'Setup' };
+/** Crumbs of pages one level below a section, e.g. /apps/:id/integrations/meta. */
+const SUB_TITLES: Record<string, string> = { meta: 'Meta Ads' };
+const TITLES: Record<string, string> = { '': 'Overview', customers: 'Customers', links: 'Links', settings: 'Settings', setup: 'Setup', integrations: 'Integrations' };
 
 function AppAvatar({ name, className }: { name: string; className?: string }) {
   return (
@@ -238,7 +241,9 @@ function SidebarBody({ onNavigate, onLogout }: { onNavigate?: () => void; onLogo
 
 function Breadcrumb() {
   const { app } = useShell();
-  const section = useMatch('/apps/:id/:section')?.params.section ?? '';
+  // Deeper pages (e.g. integrations/meta) keep their section's crumb and add their own heading.
+  const section = useMatch('/apps/:id/:section/*')?.params.section ?? '';
+  const sub = useMatch('/apps/:id/:section/:sub')?.params.sub;
   const inApp = useMatch('/apps/:id/*');
   const onNewApp = useMatch('/setup');
   if (inApp) {
@@ -256,9 +261,23 @@ function Breadcrumb() {
             </span>
           </>
         )}
-        <Current className="truncate font-medium" aria-current="page">
-          {TITLES[section] ?? section}
-        </Current>
+        {sub && app ? (
+          <>
+            <Link to={`/apps/${app.id}/${section}`} className="truncate text-muted-foreground transition-colors hover:text-foreground">
+              {TITLES[section] ?? section}
+            </Link>
+            <span className="text-stone-300" aria-hidden="true">
+              /
+            </span>
+            <h1 className="truncate font-medium" aria-current="page">
+              {SUB_TITLES[sub] ?? sub}
+            </h1>
+          </>
+        ) : (
+          <Current className="truncate font-medium" aria-current="page">
+            {TITLES[section] ?? section}
+          </Current>
+        )}
       </nav>
     );
   }

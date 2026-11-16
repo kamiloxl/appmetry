@@ -12,7 +12,8 @@ import {
   progressLabel,
 } from '../lib/setup';
 import { aiPrompt, installSnippet } from '../lib/snippets';
-import type { AppInfo, SetupStatus, SetupStep, StepStatus, TrackedLink } from '../lib/types';
+import type { AppInfo, IntegrationList, SetupStatus, SetupStep, StepStatus, TrackedLink } from '../lib/types';
+import { useApi } from '../lib/useApi';
 import { useRcSecret } from '../lib/useRcSecret';
 import { useSetupStatus } from '../lib/useSetupStatus';
 import { LinkForm, linkUrl } from './Links';
@@ -256,7 +257,12 @@ function StepPrivacy({ app, onSaved }: { app: AppInfo; onSaved: (a: AppInfo) => 
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const months = Number(retention);
-  const paragraph = privacyParagraph(app.name, Number.isInteger(months) && months >= 1 ? months : app.retention_months);
+  // Active ad networks change what users must be told (advertising id, sharing, transfer).
+  const integrations = useApi<IntegrationList>(`/api/apps/${app.id}/integrations`);
+  const adNetworks = (integrations.data?.integrations ?? [])
+    .filter((i) => i.status === 'active')
+    .map((i) => integrations.data!.providers.find((p) => p.provider === i.provider)?.name.replace(/ Ads$/, '') ?? i.provider);
+  const paragraph = privacyParagraph(app.name, Number.isInteger(months) && months >= 1 ? months : app.retention_months, adNetworks);
 
   async function save(e: FormEvent) {
     e.preventDefault();

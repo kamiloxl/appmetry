@@ -7,6 +7,13 @@ export interface Env {
   SESSION_SECRET?: string;
   /** Workers Rate Limiting binding for ingestion (120 requests / 60 s per key). */
   INGEST_LIMITER?: RateLimit;
+  /** 32 random bytes, base64. Encrypts ad-network tokens and advertising ids (src/lib/sealed.ts). Unset = integrations off. */
+  INTEGRATIONS_KEY?: string;
+  /** The previous INTEGRATIONS_KEY during a key rotation, so older values still open. */
+  INTEGRATIONS_KEY_PREVIOUS?: string;
+  /** Optional Meta app for "Connect with Facebook" (dataset list). Without both, datasets are entered by hand. */
+  META_APP_ID?: string;
+  META_APP_SECRET?: string;
 }
 
 export interface AppRow {

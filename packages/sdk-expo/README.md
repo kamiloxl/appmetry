@@ -63,6 +63,49 @@ Appmetry.optOut();
 
 With `requireConsent: true` nothing is stored or sent until `optIn()`.
 
+### Ad consent (ad-network measurement)
+
+When you connect an ad network (for example Meta) in appmetry, the server can send your app's events to it so your
+campaigns learn. That only happens for installs whose user gave **ad consent**. Ad consent is separate from analytics
+consent and defaults to `false`.
+
+```ts
+Appmetry.init({ appKey, host, adConsent: false });
+// from your consent screen, or after your own ATT prompt:
+Appmetry.setAdConsent(true);  // or false to withdraw
+```
+
+- The choice is stored on the device; a later `setAdConsent` call wins over the `adConsent` option.
+- The SDK never shows the ATT prompt. It reads the ATT status and re-checks it each time the app comes to the
+  foreground, so a change in Settings reaches the server.
+- With ad consent, the SDK also sends the advertising id: the IDFA on iOS (only when ATT is `authorized`) or the GAID on
+  Android (only when the user has not limited ad tracking). The server stores it encrypted, never in raw events.
+- Nothing is sent at all while analytics consent is withheld (`requireConsent` without `optIn()`).
+
+Store and platform notes:
+
+- **iOS**: the module links `AdSupport` and `AppTrackingTransparency`. Declare IDFA use in App Store Connect and your
+  privacy manifest if you call `setAdConsent(true)`. Show the ATT prompt yourself (`expo-tracking-transparency`).
+- **Android**: the module adds the `com.google.android.gms.permission.AD_ID` permission. If you never send ad consent,
+  remove it in your manifest with `tools:node="remove"`, and declare advertising-id use in the Play data safety form if
+  you keep it.
+
+## Ad links and deferred deep links
+
+Ad links (dashboard → Integrations → Meta Ads → Ad links) can carry an in-app URL such as `myapp://onboarding/plan-6`.
+When a new install came from such a link, the SDK hands it to you once, so the first screen can match the ad:
+
+```ts
+useEffect(() => Appmetry.onDeferredDeepLink((link) => router.replace(link.url)), []);
+// link: { url, link, source, campaign, campaignId, adsetId, adId }
+```
+
+- It fires at most once per install, only within 24 h of the install, after attribution resolves (it waits up to
+  `waitMs`, default 5 s, then keeps checking in the background).
+- Android installs are matched through the Play Install Referrer. On iOS a new install is matched only when the app is
+  opened from the ad's deep link (`myapp://…?amt_l=<slug>`) or, once available, by the opt-in probabilistic match.
+- If the app was already installed, the ad's deep link opens it directly; the SDK attributes that open to the ad link.
+
 ## RevenueCat
 
 Call it after `Purchases.configure`, inside an async function (no top-level await), and before your first paywall:

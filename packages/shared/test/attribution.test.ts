@@ -24,6 +24,19 @@ describe('fromInstallReferrer', () => {
     expect(fromInstallReferrer('utm_source=google-play&utm_medium=organic', null)).toBeNull();
     expect(fromInstallReferrer('', null)).toBeNull();
   });
+  it('click-level values beat the link and the referrer; ad ids travel with the attribution', () => {
+    const a = fromInstallReferrer('click_id=c1&utm_source=x&campaign_id=1', {
+      click_id: 'c1', utm_source: 'meta', utm_medium: 'paid_social', utm_campaign: 'spring', campaign_id: '120', adset_id: '121', ad_id: '122', fbclid: 'IwAR',
+    });
+    expect(a).toMatchObject({ channel: 'Paid', utm_campaign: 'spring', campaign_id: '120', adset_id: '121', ad_id: '122', fbclid: 'IwAR', campaign_ids: null });
+  });
+  it('reads ad ids from the referrer when there is no link', () => {
+    expect(fromInstallReferrer('utm_source=meta&utm_medium=paid_social&campaign_id=7&ad_id=9', null)).toMatchObject({ campaign_id: '7', ad_id: '9', adset_id: null });
+  });
+  it('carries the link id of the click', () => {
+    expect(fromInstallReferrer('click_id=c1', { click_id: 'c1', link_id: 'L1', utm_source: 'meta' })).toMatchObject({ link_id: 'L1' });
+    expect(fromInstallReferrer('utm_source=meta', null)).toMatchObject({ link_id: null });
+  });
   it('returns null for click_id-only referrer without link', () => {
     expect(fromInstallReferrer('click_id=abc', null)).toBeNull();
   });
@@ -55,6 +68,7 @@ describe('fromTouch / fromReported', () => {
     expect(fromTouch({ utm_source: 'x', ref: 'r', click_id: 'c' }, 'deep_link')).toMatchObject({
       method: 'deep_link', source: 'X', ref: 'r', click_id: 'c', asa_campaign_id: null,
     });
+    expect(fromTouch({ utm_source: 'meta', campaign_ids: 'ARFx', fbclid: 'IwAR' }, 'deep_link')).toMatchObject({ campaign_ids: 'ARFx', fbclid: 'IwAR' });
   });
   it('reported known and unknown', () => {
     expect(fromReported('TikTok')).toMatchObject({ method: 'reported', source: 'TikTok', channel: 'Organic Social' });

@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { stripPrivateParams, touchFromQuery, type Touch } from '@appmetry/shared';
 import { type AppEnv, type AppRow, getAppById } from './env';
 import { randomId } from './lib/crypto';
 import { platformFromUA } from './lib/ua';
@@ -21,6 +22,10 @@ type Link = {
   utm_campaign: string | null;
   utm_content: string | null;
   ref: string | null;
+  /** In-app URL the ad opens (custom scheme or universal link), for deep links and personalised journeys. */
+  deep_link_url: string | null;
+  /** The ad-network integration this link was made for. */
+  integration_id: string | null;
   created_at: number;
 };
 
@@ -47,6 +52,18 @@ function optional(field: string) {
   };
 }
 
+/** A deep link: `scheme://…` (custom scheme or https universal link), no whitespace, never a script scheme. */
+const DEEP_LINK_RE = /^[a-z][a-z0-9+.-]{1,30}:\/\/\S{0,300}$/i;
+const UNSAFE_SCHEMES = /^(javascript|data|vbscript|file|blob):/i;
+
+function parseDeepLink(v: unknown): Parsed {
+  if (v === null || v === undefined || v === '') return { ok: true, value: null };
+  if (typeof v !== 'string') return bad('deep_link_url must be a string or null');
+  const s = v.trim();
+  if (!DEEP_LINK_RE.test(s) || UNSAFE_SCHEMES.test(s)) return bad('deep_link_url must look like myapp://path or https://…');
+  return { ok: true, value: s };
+}
+
 function parseSlug(v: unknown): Parsed {
   if (typeof v !== 'string') return bad('slug must be a string');
   const s = v.trim().toLowerCase();
@@ -61,7 +78,16 @@ const FIELDS: Record<string, (v: unknown) => Parsed> = {
   utm_campaign: optional('utm_campaign'),
   utm_content: optional('utm_content'),
   ref: optional('ref'),
+  deep_link_url: parseDeepLink,
 };
+
+/** integration_id must name one of this app's integrations. */
+async function checkIntegration(db: D1Database, appId: string, v: unknown): Promise<Parsed> {
+  if (v === null || v === undefined || v === '') return { ok: true, value: null };
+  if (typeof v !== 'string') return bad('integration_id must be a string or null');
+  const row = await db.prepare('SELECT id FROM integrations WHERE id = ? AND app_id = ?').bind(v, appId).first<{ id: string }>();
+  return row ? { ok: true, value: row.id } : bad('unknown integration_id');
+}
 
 async function readBody(req: Request): Promise<Record<string, unknown> | null> {
   const body = await req.json().catch(() => null);
@@ -81,14 +107,37 @@ function pickTarget(app: AppRow, platform: 'ios' | 'android' | 'other'): string 
   return app.web_url ?? app.app_store_url ?? app.play_store_url;
 }
 
-/** The Play Install Referrer value: URL-encoded once as a whole, appended to the store URL. */
-function withReferrer(playUrl: string, clickId: string, link: Link): string {
+/** Values a click's query string may set: UTM overrides and ad-network campaign parameters (spec §3). */
+const CLICK_PARAMS = [
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'campaign_id', 'adset_id', 'ad_id', 'placement', 'fbclid', 'campaign_ids',
+] as const;
+type ClickParams = Partial<Record<(typeof CLICK_PARAMS)[number], string>>;
+
+/** Click-level values from the request URL. Private params are dropped; UTM values are capped like link fields. */
+function clickParams(url: string): ClickParams {
+  const q = stripPrivateParams(url).split('?')[1] ?? '';
+  const t: Touch = touchFromQuery(q);
+  const out: ClickParams = {};
+  for (const k of CLICK_PARAMS) {
+    const v = t[k];
+    if (v) out[k] = k.startsWith('utm_') ? v.slice(0, OPTIONAL_MAX) : v;
+  }
+  return out;
+}
+
+/** The Play Install Referrer value: URL-encoded once as a whole, appended to the store URL. Click values beat link values. */
+function withReferrer(playUrl: string, clickId: string, link: Link, click: ClickParams): string {
   const params = new URLSearchParams({ click_id: clickId });
-  if (link.utm_source) params.set('utm_source', link.utm_source);
-  if (link.utm_medium) params.set('utm_medium', link.utm_medium);
-  if (link.utm_campaign) params.set('utm_campaign', link.utm_campaign);
-  if (link.utm_content) params.set('utm_content', link.utm_content);
-  if (link.ref) params.set('ref', link.ref);
+  const set = (k: string, v: string | null | undefined) => {
+    if (v) params.set(k, v);
+  };
+  set('utm_source', click.utm_source ?? link.utm_source);
+  set('utm_medium', click.utm_medium ?? link.utm_medium);
+  set('utm_campaign', click.utm_campaign ?? link.utm_campaign);
+  set('utm_term', click.utm_term);
+  set('utm_content', click.utm_content ?? link.utm_content);
+  set('ref', link.ref);
+  for (const k of ['campaign_id', 'adset_id', 'ad_id', 'placement', 'fbclid', 'campaign_ids'] as const) set(k, click[k]);
   return `${playUrl}${playUrl.includes('?') ? '&' : '?'}referrer=${encodeURIComponent(params.toString())}`;
 }
 
@@ -105,13 +154,17 @@ linksRoutes.get('/l/:slug', async (c) => {
   if (!target) return plain('Link not available');
 
   const clickId = `c_${randomId(10)}`;
-  if (platform === 'android' && target === app.play_store_url) target = withReferrer(target, clickId, link);
+  const params = clickParams(c.req.url);
+  if (platform === 'android' && target === app.play_store_url) target = withReferrer(target, clickId, link, params);
 
-  // Only platform and country are kept: no IP, user agent or referrer.
+  // Kept: platform, country and the campaign parameters from the link's query string. No IP, user agent or referrer.
   const country = (c.req.raw.cf?.country as string | undefined) ?? null;
   c.executionCtx.waitUntil(
-    c.env.DB.prepare('INSERT INTO link_clicks (id, link_id, app_id, ts, platform, country) VALUES (?, ?, ?, ?, ?, ?)')
-      .bind(clickId, link.id, app.id, Date.now(), platform, country)
+    c.env.DB.prepare(
+      `INSERT INTO link_clicks (id, link_id, app_id, ts, platform, country, ${CLICK_PARAMS.join(', ')})
+       VALUES (${Array(6 + CLICK_PARAMS.length).fill('?').join(', ')})`,
+    )
+      .bind(clickId, link.id, app.id, Date.now(), platform, country, ...CLICK_PARAMS.map((k) => params[k] ?? null))
       .run()
       .catch((err) => console.error('link click insert failed', err)),
   );
@@ -140,6 +193,8 @@ linksRoutes.post('/api/apps/:id/links', async (c) => {
     if (!r.ok) return c.json({ error: r.error }, 400);
     values[field] = r.value;
   }
+  const integration = await checkIntegration(c.env.DB, app.id, body.integration_id);
+  if (!integration.ok) return c.json({ error: integration.error }, 400);
   let slug = randomId(4);
   if (body.slug !== undefined && body.slug !== null) {
     const r = parseSlug(body.slug);
@@ -157,13 +212,19 @@ linksRoutes.post('/api/apps/:id/links', async (c) => {
     utm_campaign: values.utm_campaign,
     utm_content: values.utm_content,
     ref: values.ref,
+    deep_link_url: values.deep_link_url,
+    integration_id: integration.value as string | null,
     created_at: Date.now(),
   };
   try {
     await c.env.DB.prepare(
-      'INSERT INTO links (id, app_id, slug, name, utm_source, utm_medium, utm_campaign, utm_content, ref, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      `INSERT INTO links (id, app_id, slug, name, utm_source, utm_medium, utm_campaign, utm_content, ref, deep_link_url, integration_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-      .bind(link.id, link.app_id, link.slug, link.name, link.utm_source, link.utm_medium, link.utm_campaign, link.utm_content, link.ref, link.created_at)
+      .bind(
+        link.id, link.app_id, link.slug, link.name, link.utm_source, link.utm_medium, link.utm_campaign, link.utm_content, link.ref,
+        link.deep_link_url, link.integration_id, link.created_at,
+      )
       .run();
   } catch (err) {
     if (isUniqueViolation(err)) return c.json({ error: 'slug_taken' }, 409);
@@ -188,6 +249,12 @@ linksRoutes.patch('/api/apps/:id/links/:linkId', async (c) => {
     if (!r.ok) return c.json({ error: r.error }, 400);
     sets.push(`${field} = ?`);
     values.push(r.value);
+  }
+  if ('integration_id' in body) {
+    const r = await checkIntegration(c.env.DB, app.id, body.integration_id);
+    if (!r.ok) return c.json({ error: r.error }, 400);
+    sets.push('integration_id = ?');
+    values.push(r.value as string | null);
   }
   if (sets.length) {
     try {

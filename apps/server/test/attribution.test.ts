@@ -83,6 +83,20 @@ describe('install referrer', () => {
     expect(click).toBe(iid);
   });
 
+  it('click-level campaign parameters reach the install', async () => {
+    const app = await createApp(cookie);
+    await addLink(app.id, 'link-0010', { utm_source: 'meta', utm_medium: 'paid_social', utm_campaign: 'link-level', utm_content: null });
+    await addClick(app.id, 'link-0010', 'click-0010');
+    await env.DB.prepare('UPDATE link_clicks SET utm_campaign = ?, campaign_id = ?, adset_id = ?, ad_id = ?, fbclid = ? WHERE id = ?')
+      .bind('click-level', '120', '121', '122', 'IwAR', 'click-0010')
+      .run();
+    const iid = newIid();
+    await ingest(app, 'android', iid, [installEv({ referrer: 'click_id=click-0010&campaign_id=999' })]);
+    expect(await row(app, iid)).toMatchObject({
+      attribution_method: 'install_referrer', channel: 'Paid', utm_campaign: 'click-level', campaign_id: '120', adset_id: '121', ad_id: '122', fbclid: 'IwAR',
+    });
+  });
+
   it('ignores click_id of another app', async () => {
     const app = await createApp(cookie);
     const other = await createApp(cookie);
@@ -275,6 +289,7 @@ describe('Apple Search Ads', () => {
     await applyAttribution(env.DB, app.id, iid, {
       method: 'search_ads', source: 'Apple Search Ads', channel: 'Paid Search', utm_source: null, utm_medium: null, utm_campaign: null,
       utm_term: null, utm_content: null, ref: null, click_id: null, asa_campaign_id: 5, asa_adgroup_id: null, asa_keyword_id: null,
+      campaign_id: null, adset_id: null, ad_id: null, fbclid: null, campaign_ids: null, link_id: null,
     });
     expect(await row(app, iid)).toMatchObject({ attribution_method: 'install_referrer', utm_source: 'google', asa_campaign_id: null });
   });
@@ -331,3 +346,51 @@ describe('GET /api/v1/attribution', () => {
     expect((await getAttribution(app.app_key, 'short')).status).toBe(400);
   });
 });
+
+describe('ad links and deferred deep links', () => {
+  async function adLink(appId: string, id: string, slug: string, deepLink: string | null) {
+    await env.DB.prepare(
+      `INSERT INTO links (id, app_id, slug, name, utm_source, utm_medium, utm_campaign, deep_link_url, created_at) VALUES (?, ?, ?, 'Ad', 'meta', 'paid_social', 'spring', ?, ?)`,
+    ).bind(id, appId, slug, deepLink, Date.now()).run();
+  }
+
+  it('Android: the clicked ad link and its deep link reach the attribution response', async () => {
+    const app = await createApp(cookie);
+    await adLink(app.id, 'link-ad-1', 'meta-ad-1', 'absapp://onboarding/abs?plan=6');
+    await addClick(app.id, 'link-ad-1', 'click-ad-1');
+    await env.DB.prepare('UPDATE link_clicks SET campaign_id = ?, adset_id = ?, ad_id = ? WHERE id = ?').bind('120', '121', '122', 'click-ad-1').run();
+    const iid = newIid();
+    await ingest(app, 'android', iid, [installEv({ referrer: 'click_id=click-ad-1' })]);
+    expect(await row(app, iid)).toMatchObject({ link_id: 'link-ad-1', campaign_id: '120' });
+
+    const res = await getAttribution(app.app_key, iid);
+    expect(await res.json()).toMatchObject({
+      method: 'install_referrer', campaign_id: '120', adset_id: '121', ad_id: '122',
+      deep_link: { url: 'absapp://onboarding/abs?plan=6', link: 'meta-ad-1' },
+    });
+  });
+
+  it('a deep link with amt_l attributes to the ad link and its campaign values', async () => {
+    const app = await createApp(cookie);
+    await adLink(app.id, 'link-ad-2', 'meta-ad-2', 'absapp://onboarding/abs');
+    const iid = newIid();
+    const open = { ...installEv({}), id: `dl-${iid}`.slice(0, 40), type: 'deep_link' as const, name: 'absapp://onboarding/abs?amt_l=meta-ad-2&campaign_ids=ARFx' };
+    await ingest(app, 'ios', iid, [installEv({}), open]);
+    expect(await row(app, iid)).toMatchObject({
+      attribution_method: 'deep_link', source: 'meta', channel: 'Paid', utm_campaign: 'spring', link_id: 'link-ad-2', campaign_ids: 'ARFx',
+    });
+    expect(await (await getAttribution(app.app_key, iid)).json()).toMatchObject({ deep_link: { url: 'absapp://onboarding/abs', link: 'meta-ad-2' } });
+  });
+
+  it('a slug of another app is ignored; no link means no deep link in the response', async () => {
+    const app = await createApp(cookie);
+    const other = await createApp(cookie);
+    await adLink(other.id, 'link-ad-3', 'meta-ad-3', 'absapp://x');
+    const iid = newIid();
+    const open = { ...installEv({}), id: `dl-${iid}`.slice(0, 40), type: 'deep_link' as const, name: 'absapp://x?amt_l=meta-ad-3' };
+    await ingest(app, 'ios', iid, [installEv({}), open]);
+    expect((await row(app, iid))!.link_id).toBeNull();
+    expect(await (await getAttribution(app.app_key, iid)).json()).toMatchObject({ deep_link: null, campaign_id: null });
+  });
+});
+

@@ -1,4 +1,4 @@
-import { collectInstallProps } from '../native';
+import { collectAdSignals, collectInstallProps } from '../native';
 
 const run = (module: any, os: string) => collectInstallProps({ module, os });
 
@@ -75,5 +75,46 @@ describe('collectInstallProps', () => {
       }),
     };
     expect(await run(module, 'android')).toEqual({});
+  });
+});
+
+// The fakes implement only the methods under test.
+const ads = (c: boolean, d: { module: any; os: string }) => collectAdSignals(c, d);
+
+describe('collectAdSignals', () => {
+  const IDFA = '6D92078A-8246-4BA4-AE5B-76104861E7DC';
+  const ios = (att: string | null, id: string | null = IDFA) => ({
+    getTrackingAuthorizationStatus: jest.fn().mockResolvedValue(att),
+    getAdvertisingId: jest.fn().mockResolvedValue(id),
+  });
+
+  it('iOS with consent and ATT authorized: att and IDFA', async () => {
+    expect(await ads(true, { module: ios('authorized'), os: 'ios' })).toEqual({ adConsent: true, att: 'authorized', madid: IDFA });
+  });
+
+  it('iOS without ATT authorization or without consent never reads the IDFA', async () => {
+    const denied = ios('denied');
+    expect(await ads(true, { module: denied, os: 'ios' })).toEqual({ adConsent: true, att: 'denied' });
+    expect(denied.getAdvertisingId).not.toHaveBeenCalled();
+    const noConsent = ios('authorized');
+    expect(await ads(false, { module: noConsent, os: 'ios' })).toEqual({ adConsent: false, att: 'authorized' });
+    expect(noConsent.getAdvertisingId).not.toHaveBeenCalled();
+  });
+
+  it('Android reads the GAID only with consent and drops the all-zero id', async () => {
+    const gaid = '38400000-8cf0-11bd-b23e-10b96e40000d';
+    const mod = { getAdvertisingId: jest.fn().mockResolvedValue(gaid) };
+    expect(await ads(true, { module: mod, os: 'android' })).toEqual({ adConsent: true, madid: gaid });
+    expect(await ads(false, { module: mod, os: 'android' })).toEqual({ adConsent: false });
+    expect(mod.getAdvertisingId).toHaveBeenCalledTimes(1);
+    const zero = { getAdvertisingId: jest.fn().mockResolvedValue('00000000-0000-0000-0000-000000000000') };
+    expect(await ads(true, { module: zero, os: 'android' })).toEqual({ adConsent: true });
+  });
+
+  it('ignores unknown values, missing modules and native errors', async () => {
+    expect(await ads(true, { module: ios('weird', 'not-an-id'), os: 'ios' })).toEqual({ adConsent: true });
+    expect(await ads(true, { module: null as any, os: 'ios' })).toEqual({ adConsent: true });
+    const failing = { getTrackingAuthorizationStatus: jest.fn().mockRejectedValue(new Error('x')) };
+    expect(await ads(true, { module: failing, os: 'ios' })).toEqual({ adConsent: true });
   });
 });
